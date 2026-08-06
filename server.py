@@ -11,7 +11,7 @@ import pandas as pd
 
 
 BASE_DIR = Path(__file__).resolve().parent
-STATIC_DIR = BASE_DIR / "static"
+STATIC_DIR = BASE_DIR
 MAX_UPLOAD_BYTES = 30 * 1024 * 1024
 SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ6p-wOSp1QP31f8g5CbmLsinCmoHcaR5I-scRqj2qYNWmNLKZKReBg52u9SCKclmU9yGPWJBvLbSQW/pub?gid=0&single=true&output=csv"
 
@@ -340,6 +340,9 @@ class AppHandler(BaseHTTPRequestHandler):
     def serve_static(self):
         parsed = urlparse(self.path)
         path = parsed.path.strip("/") or "index.html"
+        if path not in {"index.html", "app.js", "styles.css"}:
+            self.send_error(404)
+            return
         target = (STATIC_DIR / path).resolve()
         if not str(target).startswith(str(STATIC_DIR.resolve())) or not target.exists():
             self.send_error(404)
