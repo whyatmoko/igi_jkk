@@ -162,6 +162,14 @@ h1 {
   border-radius: 8px;
 }
 
+.notice-meta {
+  margin-top: 6px;
+  font-size: 13px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+}
+
 .notice.error {
   background: var(--over-bg);
   border-color: #ffc1c1;

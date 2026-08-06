@@ -2,6 +2,36 @@ const STORAGE_KEY = "sla-monitoring:last-result";
 const DB_NAME = "sla-monitoring-db";
 const DB_STORE = "datasets";
 const DB_KEY = "last-result";
+const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ6p-wOSp1QP31f8g5CbmLsinCmoHcaR5I-scRqj2qYNWmNLKZKReBg52u9SCKclmU9yGPWJBvLbSQW/pub?gid=0&single=true&output=csv";
+const RULES = {
+  pemeriksaan: {
+    durationCol: "lama_pemeriksaan",
+    slaCol: "sla_pemeriksaan",
+    startCol: "tgl_submit_invoice",
+    endCol: "tgl_dokumen_lengkap",
+    limit: 7,
+    watchStart: 5,
+    label: "Pemeriksaan",
+  },
+  verifikasi: {
+    durationCol: "lama_verifikasi",
+    slaCol: "sla_verifikasi",
+    startCol: "tgl_dokumen_lengkap",
+    endCol: "tgl_approval_penetapan",
+    limit: 10,
+    watchStart: 7,
+    label: "Verifikasi",
+  },
+  pembayaran: {
+    durationCol: "lama_pembayaran",
+    slaCol: "sla_pembayaran",
+    startCol: "tgl_approval_penetapan",
+    endCol: "tgl_siap_bayar",
+    limit: 7,
+    watchStart: 5,
+    label: "Pembayaran",
+  },
+};
 
 const state = {
   data: null,
@@ -45,6 +75,47 @@ const els = {
 function setNotice(message, type = "") {
   els.notice.className = `notice ${type}`.trim();
   els.notice.innerHTML = message;
+}
+
+function getLastUpdateData(data = state.data) {
+  if (!data) return null;
+  if (data.lastUpdateData) return data.lastUpdateData;
+  const values = (data.records || [])
+    .map((record) => record.tanggal_tarik_data)
+    .filter(Boolean);
+  if (!values.length) return null;
+  const dated = values
+    .map((value) => ({ value, date: parseDateValue(value) }))
+    .filter((item) => item.date)
+    .sort((a, b) => b.date - a.date);
+  return dated[0]?.value || values[0];
+}
+
+function formatLastUpdateData(value) {
+  if (!value) return "-";
+  const date = parseDateValue(value);
+  if (!date) return String(value);
+  return new Intl.DateTimeFormat("id-ID", {
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+  }).format(date);
+}
+
+function getLastSubmitInvoice(data = state.data) {
+  if (!data) return null;
+  if (data.lastSubmitInvoice) return data.lastSubmitInvoice;
+  const dated = (data.records || [])
+    .map((record) => parseDateValue(record.tgl_submit_invoice))
+    .filter(Boolean)
+    .sort((a, b) => b - a);
+  return dated[0] || null;
+}
+
+function buildDataNotice(message, data = state.data) {
+  const lastUpdate = formatLastUpdateData(getLastUpdateData(data));
+  const lastSubmit = formatLastUpdateData(getLastSubmitInvoice(data));
+  return `${message}<div class="notice-meta">Last update data: <strong>${escapeHtml(lastUpdate)}</strong> <span>Tanggal data terakhir: <strong>${escapeHtml(lastSubmit)}</strong></span></div>`;
 }
 
 function formatNumber(value) {
@@ -105,6 +176,275 @@ async function readJsonResponse(response, fallbackMessage) {
     const detail = isHtml ? "Server mengembalikan halaman HTML, bukan data JSON." : text.slice(0, 180);
     throw new Error(`${fallbackMessage} ${detail}`);
   }
+}
+
+function parseCsv(text) {
+  const rows = [];
+  let row = [];
+  let cell = "";
+  let quoted = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i];
+    const next = text[i + 1];
+    if (quoted) {
+      if (char === '"' && next === '"') {
+        cell += '"';
+        i += 1;
+      } else if (char === '"') {
+        quoted = false;
+      } else {
+        cell += char;
+      }
+    } else if (char === '"') {
+      quoted = true;
+    } else if (char === ",") {
+      row.push(cell);
+      cell = "";
+    } else if (char === "\n") {
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = "";
+    } else if (char !== "\r") {
+      cell += char;
+    }
+  }
+  if (cell || row.length) {
+    row.push(cell);
+    rows.push(row);
+  }
+  const headers = (rows.shift() || []).map((header) => header.trim());
+  const records = rows
+    .filter((values) => values.some((value) => value.trim()))
+    .map((values) => Object.fromEntries(headers.map((header, index) => [header, values[index]?.trim() ?? ""])));
+  return { headers, records };
+}
+
+function getValue(row, column) {
+  const value = row[column];
+  return value === "" || value == null ? null : value;
+}
+
+function getNumber(row, column) {
+  const raw = getValue(row, column);
+  if (raw == null) return null;
+  const normalized = String(raw).replace(/\./g, "").replace(",", ".");
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeSla(value) {
+  return String(value ?? "").trim().toUpperCase();
+}
+
+function parseDateValue(value) {
+  if (!value) return null;
+  const raw = String(value).trim();
+  const iso = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (iso) {
+    return new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+  }
+  const local = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
+  if (local) {
+    return new Date(Number(local[3]), Number(local[2]) - 1, Number(local[1]));
+  }
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+}
+
+function diffDays(start, end) {
+  const msPerDay = 24 * 60 * 60 * 1000;
+  return Math.max(0, Math.round((end - start) / msPerDay));
+}
+
+function getDurationDays(row, rule, mode) {
+  const directDays = getNumber(row, rule.durationCol);
+  if (directDays != null) return [directDays, "kolom durasi"];
+
+  const start = parseDateValue(getValue(row, rule.startCol));
+  let end = parseDateValue(getValue(row, rule.endCol));
+  if (!start) return [null, "kolom SLA"];
+  if (!end && mode === "running") {
+    const today = new Date();
+    end = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  }
+  if (!end) return [null, "kolom SLA"];
+  return [diffDays(start, end), "estimasi tanggal"];
+}
+
+function classifyDuration(days, rule) {
+  if (days == null) {
+    return { status: "KOSONG", statusLabel: "Data kosong", severity: 0, bucket: "Data kosong" };
+  }
+  if (days > rule.limit) {
+    return { status: "OVER", statusLabel: "Over SLA", severity: 3, bucket: `>${rule.limit} hari` };
+  }
+  if (days === rule.limit) {
+    return { status: "BATAS", statusLabel: "Batas SLA", severity: 2, bucket: `${Math.trunc(days)} hari` };
+  }
+  if (days >= rule.watchStart) {
+    return { status: "WARNING", statusLabel: "Mendekati SLA", severity: 1, bucket: `${Math.trunc(days)} hari` };
+  }
+  return { status: "AMAN", statusLabel: "Aman", severity: 0, bucket: "Aman" };
+}
+
+function classifyWithSla(days, rule, existingSla, mode) {
+  const byDuration = classifyDuration(days, rule);
+  if (mode === "running") return byDuration;
+  if (existingSla.includes("OVER")) {
+    return { ...byDuration, status: "OVER", statusLabel: "Over SLA", severity: 3, bucket: `>${rule.limit} hari` };
+  }
+  if (existingSla.includes("SESUAI")) {
+    return { ...byDuration, status: "AMAN", statusLabel: "Sesuai SLA", severity: 0, bucket: "Aman" };
+  }
+  return byDuration;
+}
+
+function processSheetRows(rows, columns, mode = "running") {
+  const records = [];
+  const processItems = [];
+  const summary = {
+    totalClaims: rows.length,
+    overall: { over: 0, warning: 0, safe: 0, empty: 0 },
+    process: {},
+    buckets: {},
+  };
+  Object.entries(RULES).forEach(([key, rule]) => {
+    summary.process[key] = {
+      label: rule.label,
+      limit: rule.limit,
+      watchStart: rule.watchStart,
+      over: 0,
+      warning: 0,
+      boundary: 0,
+      safe: 0,
+      empty: 0,
+    };
+    summary.buckets[key] = {};
+  });
+
+  rows.forEach((row, index) => {
+    const kodeKlaim = String(getValue(row, "kode_klaim") || `ROW-${index + 2}`).trim();
+    const wilayah = getValue(row, "nama_wilayah");
+    const kodeKantor = getValue(row, "kode_kantor");
+    const kantor = getValue(row, "nama_kantor");
+    const kantorTk = getValue(row, "nama_kantor_tk");
+    const namaTk = getValue(row, "nama_tk");
+    const perusahaan = getValue(row, "nama_perusahaan") || getValue(row, "nama_faskes_detil");
+    const statusKlaim = getValue(row, "status_klaim") || (getValue(row, "flag_bayar") === "1" ? "BAYAR" : getValue(row, "flag_bayar"));
+    const checks = {};
+    let maxSeverity = 0;
+    const openProcesses = [];
+
+    Object.entries(RULES).forEach(([key, rule]) => {
+      const existingSla = normalizeSla(getValue(row, rule.slaCol));
+      const [rawDays, daySource] = getDurationDays(row, rule, mode);
+      const days = rawDays == null ? null : Number(rawDays);
+      const classification = classifyWithSla(days, rule, existingSla, mode);
+      const mismatch = Boolean(existingSla) && (
+        (existingSla.includes("OVER") && classification.status !== "OVER")
+        || (!existingSla.includes("OVER") && classification.status === "OVER")
+      );
+      const check = {
+        key,
+        label: rule.label,
+        days: days == null ? null : Number.isInteger(days) ? days : Number(days.toFixed(1)),
+        limit: rule.limit,
+        watchStart: rule.watchStart,
+        slaColumn: existingSla,
+        daySource,
+        mismatch,
+        ...classification,
+      };
+      checks[key] = check;
+      maxSeverity = Math.max(maxSeverity, classification.severity);
+      if (classification.severity > 0) openProcesses.push(rule.label);
+
+      const procSummary = summary.process[key];
+      if (classification.status === "OVER") procSummary.over += 1;
+      else if (classification.status === "BATAS") {
+        procSummary.boundary += 1;
+        procSummary.warning += 1;
+      } else if (classification.status === "WARNING") procSummary.warning += 1;
+      else if (classification.status === "AMAN") procSummary.safe += 1;
+      else procSummary.empty += 1;
+
+      summary.buckets[key][classification.bucket] = (summary.buckets[key][classification.bucket] || 0) + 1;
+      processItems.push({
+        kode_klaim: kodeKlaim,
+        nama_wilayah: wilayah,
+        kode_kantor: kodeKantor,
+        nama_kantor: kantor,
+        nama_tk: namaTk,
+        process: key,
+        processLabel: rule.label,
+        days: check.days,
+        limit: rule.limit,
+        status: classification.status,
+        statusLabel: classification.statusLabel,
+        severity: classification.severity,
+        bucket: classification.bucket,
+        slaColumn: existingSla,
+        mismatch,
+      });
+    });
+
+    let overallStatus = "AMAN";
+    if (maxSeverity >= 3) {
+      overallStatus = "OVER";
+      summary.overall.over += 1;
+    } else if (maxSeverity >= 1) {
+      overallStatus = "WARNING";
+      summary.overall.warning += 1;
+    } else {
+      summary.overall.safe += 1;
+    }
+
+    records.push({
+      kode_klaim: kodeKlaim,
+      nama_wilayah: wilayah,
+      kode_kantor: kodeKantor,
+      nama_kantor: kantor,
+      nama_kantor_tk: kantorTk,
+      nama_tk: namaTk,
+      nama_perusahaan: perusahaan,
+      jenis_penetapan: getValue(row, "jenis_penetapan"),
+      nama_faskes_detil: getValue(row, "nama_faskes_detil"),
+      status_klaim: statusKlaim,
+      tgl_rekam: getValue(row, "tgl_rekam"),
+      tanggal_tarik_data: getValue(row, "tanggal_tarik_data"),
+      tgl_submit_invoice: getValue(row, "tgl_submit_invoice"),
+      tgl_dokumen_lengkap: getValue(row, "tgl_dokumen_lengkap"),
+      tgl_approval_penetapan: getValue(row, "tgl_approval_penetapan"),
+      tgl_siap_bayar: getValue(row, "tgl_siap_bayar"),
+      overallStatus,
+      priorityScore: maxSeverity,
+      openProcesses: openProcesses.length ? openProcesses.join(", ") : "-",
+      checks,
+    });
+  });
+
+  processItems.sort((a, b) => b.severity - a.severity || a.processLabel.localeCompare(b.processLabel) || a.kode_klaim.localeCompare(b.kode_klaim));
+  records.sort((a, b) => b.priorityScore - a.priorityScore || a.kode_klaim.localeCompare(b.kode_klaim));
+  const payload = { columns, records, processItems, summary, mode };
+  payload.lastUpdateData = getLastUpdateData(payload);
+  payload.lastSubmitInvoice = getLastSubmitInvoice(payload);
+  return payload;
+}
+
+async function fetchPublishedSheetData() {
+  const response = await fetch(SHEET_CSV_URL);
+  if (!response.ok) throw new Error("Gagal mengambil CSV dari Google Spreadsheet.");
+  const text = await response.text();
+  if (text.trim().startsWith("<")) {
+    throw new Error("Google Spreadsheet belum mengembalikan format CSV.");
+  }
+  const { headers, records } = parseCsv(text);
+  const payload = processSheetRows(records, headers, state.filters.mode);
+  payload.fileName = "Google Spreadsheet SLA";
+  payload.sourceUrl = SHEET_CSV_URL;
+  payload.sourceMode = "browser";
+  return payload;
 }
 
 function downloadExcelFile(fileName, sheetName, headers, rows) {
@@ -333,7 +673,7 @@ async function uploadFile(file) {
     method: "POST",
     body: form,
   });
-  const payload = await readJsonResponse(response, "Gagal membaca respons upload.");
+  const payload = await readJsonResponse(response, "Upload manual hanya tersedia saat aplikasi dijalankan lokal dengan server.");
   if (!response.ok) {
     throw new Error(payload.error || "Gagal membaca file.");
   }
@@ -342,23 +682,28 @@ async function uploadFile(file) {
   resetPages();
   await saveData(payload);
   const modeLabel = payload.mode === "running" ? "Bulan Berjalan" : "Data Final/Bayar";
-  setNotice(`Data <strong>${payload.fileName}</strong> berhasil diproses dengan mode <strong>${modeLabel}</strong> dan disimpan lokal di browser.`, "success");
+  setNotice(buildDataNotice(`Data <strong>${payload.fileName}</strong> berhasil diproses dengan mode <strong>${modeLabel}</strong> dan disimpan lokal di browser.`, payload), "success");
   render();
 }
 
 async function refreshFromSheet() {
   setNotice("Sedang mengambil data dari Google Spreadsheet...", "");
-  const response = await fetch(`/api/sheet?mode=${encodeURIComponent(state.filters.mode)}`);
-  const payload = await readJsonResponse(response, "Gagal membaca respons Spreadsheet.");
-  if (!response.ok) {
-    throw new Error(payload.error || "Gagal mengambil data dari Spreadsheet.");
+  let payload;
+  try {
+    const response = await fetch(`/api/sheet?mode=${encodeURIComponent(state.filters.mode)}`);
+    payload = await readJsonResponse(response, "Gagal membaca respons Spreadsheet.");
+    if (!response.ok) {
+      throw new Error(payload.error || "Gagal mengambil data dari Spreadsheet.");
+    }
+  } catch {
+    payload = await fetchPublishedSheetData();
   }
   payload.loadedAt = new Date().toISOString();
   state.data = payload;
   resetPages();
   await saveData(payload);
   const modeLabel = payload.mode === "running" ? "Bulan Berjalan" : "Data Final/Bayar";
-  setNotice(`Data <strong>${payload.fileName}</strong> berhasil diambil dari Spreadsheet dengan mode <strong>${modeLabel}</strong> dan disimpan lokal di browser.`, "success");
+  setNotice(buildDataNotice(`Data <strong>${payload.fileName}</strong> berhasil diambil dari Spreadsheet dengan mode <strong>${modeLabel}</strong> dan disimpan lokal di browser.`, payload), "success");
   render();
 }
 
@@ -677,7 +1022,7 @@ els.processFilter.addEventListener("change", (event) => {
 els.modeSelect.addEventListener("change", (event) => {
   state.filters.mode = event.target.value;
   const modeLabel = state.filters.mode === "running" ? "Bulan Berjalan" : "Data Final/Bayar";
-  setNotice(`Mode hitung disiapkan: <strong>${modeLabel}</strong>. Upload ulang file agar mode ini diterapkan.`, "");
+  setNotice(buildDataNotice(`Mode hitung disiapkan: <strong>${modeLabel}</strong>. Ambil ulang data agar mode ini diterapkan.`), "");
 });
 
 els.searchInput.addEventListener("input", (event) => {
@@ -724,7 +1069,7 @@ async function init() {
   }
   state.data = await loadData();
   if (state.data) {
-    setNotice(`Data terakhir <strong>${state.data.fileName}</strong> dimuat dari penyimpanan lokal browser.`, "success");
+    setNotice(buildDataNotice(`Data terakhir <strong>${state.data.fileName}</strong> dimuat dari penyimpanan lokal browser.`), "success");
     if (state.data.mode && els.modeSelect) {
       state.filters.mode = state.data.mode;
       els.modeSelect.value = state.data.mode;

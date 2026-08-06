@@ -190,6 +190,19 @@ def process_dataframe(df, mode="final"):
 
     records = []
     process_items = []
+    last_update_data = None
+    if "tanggal_tarik_data" in df.columns:
+        update_dates = pd.to_datetime(df["tanggal_tarik_data"], errors="coerce").dropna()
+        if not update_dates.empty:
+            last_update_data = as_jsonable(update_dates.max().normalize())
+        else:
+            update_values = [as_jsonable(value) for value in df["tanggal_tarik_data"].dropna().unique()]
+            last_update_data = update_values[0] if update_values else None
+    last_submit_invoice = None
+    if "tgl_submit_invoice" in df.columns:
+        submit_dates = pd.to_datetime(df["tgl_submit_invoice"], errors="coerce").dropna()
+        if not submit_dates.empty:
+            last_submit_invoice = as_jsonable(submit_dates.max().normalize())
     summary = {
         "totalClaims": int(len(df)),
         "overall": {"over": 0, "warning": 0, "safe": 0, "empty": 0},
@@ -306,6 +319,7 @@ def process_dataframe(df, mode="final"):
             "nama_faskes_detil": nama_faskes,
             "status_klaim": status_klaim,
             "tgl_rekam": tgl_rekam,
+            "tanggal_tarik_data": as_jsonable(row.get("tanggal_tarik_data")),
             "tgl_submit_invoice": as_jsonable(row.get("tgl_submit_invoice")),
             "tgl_dokumen_lengkap": as_jsonable(row.get("tgl_dokumen_lengkap")),
             "tgl_approval_penetapan": as_jsonable(row.get("tgl_approval_penetapan")),
@@ -325,6 +339,8 @@ def process_dataframe(df, mode="final"):
         "processItems": process_items,
         "summary": summary,
         "mode": mode,
+        "lastUpdateData": last_update_data,
+        "lastSubmitInvoice": last_submit_invoice,
     }
 
 
