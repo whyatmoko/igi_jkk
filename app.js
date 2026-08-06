@@ -3,6 +3,7 @@ const DB_NAME = "sla-monitoring-db";
 const DB_STORE = "datasets";
 const DB_KEY = "last-result";
 const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ6p-wOSp1QP31f8g5CbmLsinCmoHcaR5I-scRqj2qYNWmNLKZKReBg52u9SCKclmU9yGPWJBvLbSQW/pub?gid=0&single=true&output=csv";
+const SHEET_GVIZ_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ6p-wOSp1QP31f8g5CbmLsinCmoHcaR5I-scRqj2qYNWmNLKZKReBg52u9SCKclmU9yGPWJBvLbSQW/gviz/tq?gid=0";
 const RULES = {
   pemeriksaan: {
     durationCol: "lama_pemeriksaan",
@@ -217,6 +218,19 @@ function parseCsv(text) {
   const records = rows
     .filter((values) => values.some((value) => value.trim()))
     .map((values) => Object.fromEntries(headers.map((header, index) => [header, values[index]?.trim() ?? ""])));
+  return { headers, records };
+}
+
+function parseGvizTable(table) {
+  const headers = (table.cols || []).map((col, index) => String(col.label || col.id || `col_${index + 1}`).trim());
+  const records = (table.rows || []).map((row) => {
+    const record = {};
+    headers.forEach((header, index) => {
+      const cell = row.c?.[index];
+      record[header] = cell?.f ?? cell?.v ?? "";
+    });
+    return record;
+  }).filter((record) => Object.values(record).some((value) => String(value ?? "").trim()));
   return { headers, records };
 }
 
@@ -445,6 +459,49 @@ async function fetchPublishedSheetData() {
   payload.sourceUrl = SHEET_CSV_URL;
   payload.sourceMode = "browser";
   return payload;
+}
+
+function isLocalApiHost() {
+  return ["localhost", "127.0.0.1"].includes(window.location.hostname);
+}
+
+function fetchGvizSheetData() {
+  return new Promise((resolve, reject) => {
+    const callbackName = `slaSheetCallback_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const script = document.createElement("script");
+    const cleanup = () => {
+      delete window[callbackName];
+      script.remove();
+    };
+    const timeout = window.setTimeout(() => {
+      cleanup();
+      reject(new Error("Timeout saat mengambil data Google Spreadsheet."));
+    }, 60000);
+
+    window[callbackName] = (payload) => {
+      window.clearTimeout(timeout);
+      try {
+        const { headers, records } = parseGvizTable(payload.table || {});
+        const result = processSheetRows(records, headers, state.filters.mode);
+        result.fileName = "Google Spreadsheet SLA";
+        result.sourceUrl = SHEET_GVIZ_URL;
+        result.sourceMode = "jsonp";
+        cleanup();
+        resolve(result);
+      } catch (error) {
+        cleanup();
+        reject(error);
+      }
+    };
+
+    script.onerror = () => {
+      window.clearTimeout(timeout);
+      cleanup();
+      reject(new Error("Gagal memuat data Google Spreadsheet."));
+    };
+    script.src = `${SHEET_GVIZ_URL}&tqx=responseHandler:${callbackName}`;
+    document.head.appendChild(script);
+  });
 }
 
 function downloadExcelFile(fileName, sheetName, headers, rows) {
@@ -689,14 +746,27 @@ async function uploadFile(file) {
 async function refreshFromSheet() {
   setNotice("Sedang mengambil data dari Google Spreadsheet...", "");
   let payload;
-  try {
-    const response = await fetch(`/api/sheet?mode=${encodeURIComponent(state.filters.mode)}`);
-    payload = await readJsonResponse(response, "Gagal membaca respons Spreadsheet.");
-    if (!response.ok) {
-      throw new Error(payload.error || "Gagal mengambil data dari Spreadsheet.");
+  const errors = [];
+  if (isLocalApiHost()) {
+    try {
+      const response = await fetch(`/api/sheet?mode=${encodeURIComponent(state.filters.mode)}`);
+      payload = await readJsonResponse(response, "Gagal membaca respons Spreadsheet.");
+      if (!response.ok) {
+        throw new Error(payload.error || "Gagal mengambil data dari Spreadsheet.");
+      }
+    } catch (error) {
+      errors.push(error.message);
     }
-  } catch {
-    payload = await fetchPublishedSheetData();
+  }
+  if (!payload) {
+    try {
+      payload = await fetchPublishedSheetData();
+    } catch (error) {
+      errors.push(error.message);
+    }
+  }
+  if (!payload) {
+    throw new Error(`Gagal mengambil data Spreadsheet. ${errors.filter(Boolean).join(" ")}`);
   }
   payload.loadedAt = new Date().toISOString();
   state.data = payload;
