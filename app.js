@@ -96,6 +96,17 @@ function renderHeatCell(value, isOver = false, extraClass = "") {
   return `<td class="${[heatClass(value, isOver), extraClass].filter(Boolean).join(" ")}">${display}</td>`;
 }
 
+async function readJsonResponse(response, fallbackMessage) {
+  const text = await response.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    const isHtml = text.trim().startsWith("<");
+    const detail = isHtml ? "Server mengembalikan halaman HTML, bukan data JSON." : text.slice(0, 180);
+    throw new Error(`${fallbackMessage} ${detail}`);
+  }
+}
+
 function downloadExcelFile(fileName, sheetName, headers, rows) {
   const tableRows = [
     `<tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr>`,
@@ -322,7 +333,7 @@ async function uploadFile(file) {
     method: "POST",
     body: form,
   });
-  const payload = await response.json();
+  const payload = await readJsonResponse(response, "Gagal membaca respons upload.");
   if (!response.ok) {
     throw new Error(payload.error || "Gagal membaca file.");
   }
@@ -338,7 +349,7 @@ async function uploadFile(file) {
 async function refreshFromSheet() {
   setNotice("Sedang mengambil data dari Google Spreadsheet...", "");
   const response = await fetch(`/api/sheet?mode=${encodeURIComponent(state.filters.mode)}`);
-  const payload = await response.json();
+  const payload = await readJsonResponse(response, "Gagal membaca respons Spreadsheet.");
   if (!response.ok) {
     throw new Error(payload.error || "Gagal mengambil data dari Spreadsheet.");
   }
