@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Monitoring SLA Klaim</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="topbar">
+        <div>
+          <h1>Monitoring SLA Klaim</h1>
+          <p>Ambil data dari Spreadsheet, pecah beban klaim per proses, dan pantau yang mendekati atau melewati SLA.</p>
+        </div>
+        <div class="top-actions">
+          <div class="mode-control">
+            <label for="modeSelect">Mode Hitung</label>
+            <select id="modeSelect">
+              <option value="final">Data Final/Bayar</option>
+              <option value="running" selected>Bulan Berjalan</option>
+            </select>
+          </div>
+          <button id="refreshSheet" class="icon-button sheet-button" type="button" title="Ambil data Spreadsheet" aria-label="Ambil data Spreadsheet">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 7h12a4 4 0 0 1 0 8H9m0 0 3-3m-3 3 3 3M5 19h14" />
+            </svg>
+          </button>
+          <label class="icon-button upload-button" title="Upload data" aria-label="Upload data">
+            <input id="fileInput" type="file" accept=".xlsx,.xls,.csv">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 3v12m0-12 4 4m-4-4-4 4M4 15v4h16v-4" />
+            </svg>
+          </label>
+          <button id="clearData" class="icon-button danger-button" type="button" title="Hapus data lokal" aria-label="Hapus data lokal">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 7h16M10 11v6m4-6v6M6 7l1 14h10l1-14M9 7V4h6v3" />
+            </svg>
+          </button>
+        </div>
+      </section>
+
+      <section class="notice" id="notice">
+        Data diproses di server lokal <strong>127.0.0.1</strong> dan hasil terakhir disimpan di browser perangkat ini.
+      </section>
+
+      <section class="panel controls">
+        <div class="control-group">
+          <label for="branchFilter">Cabang</label>
+          <select id="branchFilter">
+            <option value="ALL">Semua cabang</option>
+          </select>
+        </div>
+        <div class="control-group">
+          <label for="statusFilter">Status</label>
+          <select id="statusFilter">
+            <option value="ALL">Semua</option>
+            <option value="OVER">Over SLA</option>
+            <option value="WARNING">Mendekati SLA</option>
+            <option value="BATAS">Batas SLA</option>
+            <option value="AMAN">Aman</option>
+          </select>
+        </div>
+        <div class="control-group">
+          <label for="processFilter">Proses</label>
+          <select id="processFilter">
+            <option value="ALL">Semua proses</option>
+            <option value="pemeriksaan">Pemeriksaan</option>
+            <option value="verifikasi">Verifikasi</option>
+            <option value="pembayaran">Pembayaran</option>
+          </select>
+        </div>
+        <div class="control-group wide">
+          <label for="searchInput">Cari kode klaim / kantor / tenaga kerja</label>
+          <input id="searchInput" type="search" placeholder="Ketik kata kunci">
+        </div>
+      </section>
+
+      <section class="cards" id="summaryCards"></section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <h2>Rekap Over SLA per Cabang</h2>
+          <span id="recapMeta">-</span>
+        </div>
+        <div class="table-wrap">
+          <table class="recap-table">
+            <thead>
+              <tr>
+                <th rowspan="2">Cabang</th>
+                <th rowspan="2">Total Klaim</th>
+                <th colspan="4" class="group-head group-pemeriksaan">Lama Pemeriksaan</th>
+                <th colspan="4" class="group-head group-verifikasi">Lama Verifikasi</th>
+                <th colspan="4" class="group-head group-pembayaran">Lama Pembayaran</th>
+              </tr>
+              <tr>
+                <th class="bucket-head pemeriksaan-sub"><span>5</span><small>Hari</small></th>
+                <th class="bucket-head pemeriksaan-sub"><span>6</span><small>Hari</small></th>
+                <th class="bucket-head pemeriksaan-sub"><span>7</span><small>Hari</small></th>
+                <th class="bucket-head pemeriksaan-sub"><span>&gt;7</span><small>Hari</small></th>
+                <th class="bucket-head verifikasi-sub"><span>8</span><small>Hari</small></th>
+                <th class="bucket-head verifikasi-sub"><span>9</span><small>Hari</small></th>
+                <th class="bucket-head verifikasi-sub"><span>10</span><small>Hari</small></th>
+                <th class="bucket-head verifikasi-sub"><span>&gt;10</span><small>Hari</small></th>
+                <th class="bucket-head pembayaran-sub"><span>5</span><small>Hari</small></th>
+                <th class="bucket-head pembayaran-sub"><span>6</span><small>Hari</small></th>
+                <th class="bucket-head pembayaran-sub"><span>7</span><small>Hari</small></th>
+                <th class="bucket-head pembayaran-sub"><span>&gt;7</span><small>Hari</small></th>
+              </tr>
+            </thead>
+            <tbody id="recapRows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <div class="detail-grid">
+        <section class="panel">
+          <div class="panel-heading">
+            <h2>Daftar Prioritas</h2>
+            <div class="panel-actions">
+              <span id="priorityMeta">-</span>
+              <button id="downloadPriority" class="panel-icon-button" type="button" title="Download Daftar Prioritas" aria-label="Download Daftar Prioritas">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" />
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Kode Klaim</th>
+                  <th>Kantor</th>
+                  <th>Proses</th>
+                  <th>Hari</th>
+                  <th>Batas</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="priorityRows"></tbody>
+            </table>
+          </div>
+          <div class="pagination" id="priorityPagination"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-heading">
+            <h2>Monitoring per Kode Klaim</h2>
+            <div class="panel-actions">
+              <span id="claimMeta">-</span>
+              <button id="downloadClaims" class="panel-icon-button" type="button" title="Download Monitoring Klaim" aria-label="Download Monitoring Klaim">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" />
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="claim-table">
+              <thead>
+                <tr>
+                  <th>Kode Klaim</th>
+                  <th>Kantor</th>
+                  <th>Nama TK</th>
+                  <th>Faskes / Perusahaan</th>
+                  <th>Status Klaim</th>
+                  <th>Overall</th>
+                  <th>Pemeriksaan</th>
+                  <th>Status Pemeriksaan</th>
+                  <th>Verifikasi</th>
+                  <th>Status Verifikasi</th>
+                  <th>Pembayaran</th>
+                  <th>Status Pembayaran</th>
+                </tr>
+              </thead>
+              <tbody id="claimList"></tbody>
+            </table>
+          </div>
+          <div class="pagination" id="claimPagination"></div>
+        </section>
+      </div>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>
