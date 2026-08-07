@@ -119,8 +119,37 @@ function buildDataNotice(message, data = state.data) {
   return `${message}<div class="notice-meta">Last update data: <strong>${escapeHtml(lastUpdate)}</strong> <span>Tanggal data terakhir: <strong>${escapeHtml(lastSubmit)}</strong></span></div>`;
 }
 
+function isPaidClaim(claim) {
+  const flag = String(claim.flag_bayar ?? "").trim().toUpperCase();
+  return flag === "1" || flag === "TRUE" || flag === "YA";
+}
+
+function formatShortDate(value) {
+  const date = parseDateValue(value);
+  if (!date) return "-";
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const year = date.getFullYear();
+  return `${day}-${month}-${year}`;
+}
+
+function getLastPaidDate(claims) {
+  const dated = claims
+    .filter(isPaidClaim)
+    .map((claim) => parseDateValue(claim.tgl_siap_bayar))
+    .filter(Boolean)
+    .sort((a, b) => b - a);
+  return dated[0] || null;
+}
+
 function formatNumber(value) {
   return new Intl.NumberFormat("id-ID").format(value || 0);
+}
+
+function formatPercent(value) {
+  return new Intl.NumberFormat("id-ID", {
+    maximumFractionDigits: 1,
+  }).format(Number.isFinite(value) ? value : 0);
 }
 
 function statusClass(status) {
@@ -425,6 +454,7 @@ function processSheetRows(rows, columns, mode = "running") {
       jenis_penetapan: getValue(row, "jenis_penetapan"),
       nama_faskes_detil: getValue(row, "nama_faskes_detil"),
       status_klaim: statusKlaim,
+      flag_bayar: getValue(row, "flag_bayar"),
       tgl_rekam: getValue(row, "tgl_rekam"),
       tanggal_tarik_data: getValue(row, "tanggal_tarik_data"),
       tgl_submit_invoice: getValue(row, "tgl_submit_invoice"),
@@ -781,9 +811,9 @@ function renderSummary() {
   if (!state.data?.summary) {
     els.summaryCards.innerHTML = `
       <article class="card"><span>Total Klaim</span><strong>0</strong></article>
-      <article class="card"><span>Over SLA</span><strong>0</strong></article>
-      <article class="card"><span>Mendekati SLA</span><strong>0</strong></article>
-      <article class="card"><span>Aman</span><strong>0</strong></article>
+      <article class="card card-over"><span>Over SLA</span><strong>0</strong></article>
+      <article class="card card-paid"><span>Over SLA Klaim Selesai</span><strong>0 / 0 <small>(0%)</small></strong><em>Klaim yang dibayar sd tanggal -</em></article>
+      <article class="card card-warning"><span>Mendekati SLA</span><strong>0</strong></article>
     `;
     return;
   }
@@ -794,15 +824,21 @@ function renderSummary() {
       if (claim.overallStatus === "OVER") acc.over += 1;
       else if (claim.overallStatus === "WARNING") acc.warning += 1;
       else acc.safe += 1;
+      if (isPaidClaim(claim)) {
+        acc.paid += 1;
+        if (claim.overallStatus === "OVER") acc.paidOver += 1;
+      }
       return acc;
     },
-    { total: 0, over: 0, warning: 0, safe: 0 }
+    { total: 0, over: 0, warning: 0, safe: 0, paid: 0, paidOver: 0 }
   );
+  const paidSafePercent = totals.paid ? ((totals.paid - totals.paidOver) / totals.paid) * 100 : 0;
+  const lastPaidDate = formatShortDate(getLastPaidDate(claims));
   els.summaryCards.innerHTML = `
     <article class="card"><span>Total Klaim</span><strong>${formatNumber(totals.total)}</strong></article>
-    <article class="card"><span>Over SLA</span><strong>${formatNumber(totals.over)}</strong></article>
-    <article class="card"><span>Mendekati SLA</span><strong>${formatNumber(totals.warning)}</strong></article>
-    <article class="card"><span>Aman</span><strong>${formatNumber(totals.safe)}</strong></article>
+    <article class="card card-over"><span>Over SLA</span><strong>${formatNumber(totals.over)}</strong></article>
+    <article class="card card-paid"><span>Over SLA Klaim Selesai</span><strong>${formatNumber(totals.paidOver)} / ${formatNumber(totals.paid)} <small>(${formatPercent(paidSafePercent)}%)</small></strong><em>Klaim yang dibayar sd tanggal ${escapeHtml(lastPaidDate)}</em></article>
+    <article class="card card-warning"><span>Mendekati SLA</span><strong>${formatNumber(totals.warning)}</strong></article>
   `;
 }
 
@@ -1144,8 +1180,17 @@ async function init() {
       state.filters.mode = state.data.mode;
       els.modeSelect.value = state.data.mode;
     }
+  } else {
+    setNotice("Sedang mengambil data terbaru dari Google Spreadsheet...", "");
   }
   render();
+  try {
+    await refreshFromSheet();
+  } catch (error) {
+    if (!state.data) {
+      setNotice(error.message, "error");
+    }
+  }
 }
 
 init();

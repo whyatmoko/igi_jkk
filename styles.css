@@ -240,6 +240,50 @@ h1 {
   font-size: 26px;
 }
 
+.card em {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.card-over {
+  background: var(--over-bg);
+  border-color: #fca5a5;
+  color: var(--over);
+}
+
+.card-over span,
+.card-over em {
+  color: #991b1b;
+}
+
+.card-warning {
+  background: var(--warn-bg);
+  border-color: #facc15;
+  color: var(--warn);
+}
+
+.card-warning span,
+.card-warning em {
+  color: #92400e;
+}
+
+.card-paid {
+  background: #f8fafc;
+}
+
+.card-paid strong {
+  font-size: 22px;
+}
+
+.card-paid small {
+  color: var(--safe);
+  font-size: 13px;
+  font-weight: 800;
+}
+
 .controls {
   margin-top: 0;
   margin-bottom: 14px;
@@ -669,11 +713,14 @@ th {
 }
 
 @media (max-width: 980px) {
-  .cards,
   .grid,
   .detail-grid,
   .controls {
     grid-template-columns: 1fr;
+  }
+
+  .cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .pagination {
@@ -707,6 +754,10 @@ th {
 
   h1 {
     font-size: 24px;
+  }
+
+  .cards {
+    grid-template-columns: 1fr;
   }
 
 }

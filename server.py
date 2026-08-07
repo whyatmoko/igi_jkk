@@ -232,6 +232,7 @@ def process_dataframe(df, mode="final"):
         nama_tk = as_jsonable(row.get("nama_tk"))
         perusahaan = as_jsonable(row.get("nama_perusahaan")) or as_jsonable(row.get("nama_faskes_detil"))
         status_klaim = as_jsonable(row.get("status_klaim")) or ("BAYAR" if as_jsonable(row.get("flag_bayar")) == 1 else as_jsonable(row.get("flag_bayar")))
+        flag_bayar = as_jsonable(row.get("flag_bayar"))
         tgl_rekam = as_jsonable(row.get("tgl_rekam"))
         jenis_penetapan = as_jsonable(row.get("jenis_penetapan"))
         nama_faskes = as_jsonable(row.get("nama_faskes_detil"))
@@ -318,6 +319,7 @@ def process_dataframe(df, mode="final"):
             "jenis_penetapan": jenis_penetapan,
             "nama_faskes_detil": nama_faskes,
             "status_klaim": status_klaim,
+            "flag_bayar": flag_bayar,
             "tgl_rekam": tgl_rekam,
             "tanggal_tarik_data": as_jsonable(row.get("tanggal_tarik_data")),
             "tgl_submit_invoice": as_jsonable(row.get("tgl_submit_invoice")),
