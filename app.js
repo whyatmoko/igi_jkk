@@ -382,6 +382,9 @@ function businessDaysInclusive(start, end) {
 }
 
 function getDurationDays(row, rule, mode) {
+  const directDays = getNumber(row, rule.durationCol);
+  if (directDays != null) return [directDays, "kolom durasi"];
+
   const start = parseDateValue(getValue(row, rule.startCol));
   let end = parseDateValue(getValue(row, rule.endCol));
   if (start) {
@@ -391,9 +394,6 @@ function getDurationDays(row, rule, mode) {
     }
     if (end) return [businessDaysInclusive(start, end), "hari kerja"];
   }
-
-  const directDays = getNumber(row, rule.durationCol);
-  if (directDays != null) return [directDays, "kolom durasi"];
 
   if (!start) return [null, "kolom SLA"];
   if (!end && mode === "running") {

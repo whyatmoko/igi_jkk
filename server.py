@@ -140,6 +140,10 @@ def business_days_inclusive(start, end):
 
 
 def get_duration_days(row, rule, mode):
+    direct_days = get_number(row, rule.get("duration_col"))
+    if direct_days is not None:
+        return direct_days, "kolom durasi"
+
     today = pd.Timestamp(date.today())
 
     start_col = rule.get("start_col")
@@ -152,10 +156,6 @@ def get_duration_days(row, rule, mode):
         if not pd.isna(end):
             days = business_days_inclusive(start.normalize().date(), end.normalize().date())
             return float(days), "hari kerja"
-
-    direct_days = get_number(row, rule.get("duration_col"))
-    if direct_days is not None:
-        return direct_days, "kolom durasi"
 
     if pd.isna(start) or pd.isna(end):
         return None, "kolom SLA"
