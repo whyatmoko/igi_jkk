@@ -289,7 +289,7 @@ h1 {
   margin-bottom: 14px;
   padding: 12px 14px;
   display: grid;
-  grid-template-columns: 220px 180px 190px minmax(240px, 1fr);
+  grid-template-columns: 220px 180px 190px minmax(240px, 1fr) 44px;
   gap: 12px;
   align-items: end;
 }
@@ -297,6 +297,38 @@ h1 {
 .control-group {
   display: grid;
   gap: 5px;
+}
+
+.reset-filter-group {
+  gap: 5px;
+}
+
+.filter-reset-button {
+  width: 40px;
+  min-width: 40px;
+  height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--ink);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.filter-reset-button:hover {
+  background: #f8fafc;
+}
+
+.filter-reset-button svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 label {
@@ -549,6 +581,35 @@ th {
   white-space: nowrap;
 }
 
+.sort-button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 800;
+  text-transform: inherit;
+  white-space: nowrap;
+}
+
+.sort-button:hover {
+  color: var(--ink);
+}
+
+.sort-button span {
+  display: inline-block;
+  min-width: 10px;
+  margin-left: 4px;
+  color: var(--ink);
+}
+
+.priority-table td:nth-child(4),
+.priority-table td:nth-child(5) {
+  text-align: center;
+  font-weight: 800;
+}
+
 .status {
   display: inline-flex;
   padding: 5px 9px;
@@ -679,6 +740,24 @@ th {
   background: #facc15;
   color: #332200;
   font-weight: 800;
+}
+
+.heat-near-1 {
+  background: #fef3c7;
+  color: #7c2d12;
+  font-weight: 700;
+}
+
+.heat-near-2 {
+  background: #fdba74;
+  color: #7c2d12;
+  font-weight: 800;
+}
+
+.heat-near-3 {
+  background: #f87171;
+  color: #7f1d1d;
+  font-weight: 900;
 }
 
 .heat-over {

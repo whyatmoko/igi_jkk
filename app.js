@@ -4,6 +4,33 @@ const DB_STORE = "datasets";
 const DB_KEY = "last-result";
 const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ6p-wOSp1QP31f8g5CbmLsinCmoHcaR5I-scRqj2qYNWmNLKZKReBg52u9SCKclmU9yGPWJBvLbSQW/pub?gid=0&single=true&output=csv";
 const SHEET_GVIZ_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ6p-wOSp1QP31f8g5CbmLsinCmoHcaR5I-scRqj2qYNWmNLKZKReBg52u9SCKclmU9yGPWJBvLbSQW/gviz/tq?gid=0";
+const INDONESIA_HOLIDAYS = new Set([
+  "2026-01-01",
+  "2026-01-16",
+  "2026-02-16",
+  "2026-02-17",
+  "2026-03-18",
+  "2026-03-19",
+  "2026-03-20",
+  "2026-03-21",
+  "2026-03-22",
+  "2026-03-23",
+  "2026-03-24",
+  "2026-04-03",
+  "2026-04-05",
+  "2026-05-01",
+  "2026-05-14",
+  "2026-05-15",
+  "2026-05-27",
+  "2026-05-28",
+  "2026-05-31",
+  "2026-06-01",
+  "2026-06-16",
+  "2026-08-17",
+  "2026-08-25",
+  "2026-12-24",
+  "2026-12-25",
+]);
 const RULES = {
   pemeriksaan: {
     durationCol: "lama_pemeriksaan",
@@ -48,6 +75,10 @@ const state = {
     claimPage: 1,
     pageSize: 10,
   },
+  prioritySort: {
+    key: "priority",
+    direction: "asc",
+  },
 };
 
 const els = {
@@ -69,6 +100,7 @@ const els = {
   branchFilter: document.getElementById("branchFilter"),
   processFilter: document.getElementById("processFilter"),
   searchInput: document.getElementById("searchInput"),
+  resetFilters: document.getElementById("resetFilters"),
   clearData: document.getElementById("clearData"),
   modeSelect: document.getElementById("modeSelect"),
 };
@@ -116,7 +148,7 @@ function getLastSubmitInvoice(data = state.data) {
 function buildDataNotice(message, data = state.data) {
   const lastUpdate = formatLastUpdateData(getLastUpdateData(data));
   const lastSubmit = formatLastUpdateData(getLastSubmitInvoice(data));
-  return `${message}<div class="notice-meta">Last update data: <strong>${escapeHtml(lastUpdate)}</strong> <span>Tanggal data terakhir: <strong>${escapeHtml(lastSubmit)}</strong></span></div>`;
+  return `${message}<div class="notice-meta">Last update data: <strong>${escapeHtml(lastUpdate)}</strong> <span>Last submit invoice: <strong>${escapeHtml(lastSubmit)}</strong></span></div>`;
 }
 
 function isPaidClaim(claim) {
@@ -185,16 +217,31 @@ function renderDurationCell(check) {
   return `<strong>${escapeHtml(days)}</strong> <span class="muted">/ ${escapeHtml(limit)} hari</span>`;
 }
 
-function heatClass(value, isOver = false) {
+function heatClass(value, tone = "") {
   if (!value) return "";
-  if (isOver) return value >= 50 ? "heat-over-strong" : "heat-over";
-  if (value >= 100) return "heat-watch-strong";
+  if (tone) return tone;
   return "heat-watch";
 }
 
-function renderHeatCell(value, isOver = false, extraClass = "") {
+function renderHeatCell(value, tone = "", extraClass = "") {
   const display = value ? formatNumber(value) : "0";
-  return `<td class="${[heatClass(value, isOver), extraClass].filter(Boolean).join(" ")}">${display}</td>`;
+  return `<td class="${[heatClass(value, tone), extraClass].filter(Boolean).join(" ")}">${display}</td>`;
+}
+
+function priorityTone(item) {
+  const days = Number(item.days);
+  const limit = Number(item.limit);
+  if (!Number.isFinite(days) || !Number.isFinite(limit)) return "";
+  if (days > limit) return "heat-over-strong";
+  const distance = limit - days;
+  if (distance === 0) return "heat-near-3";
+  if (distance === 1) return "heat-near-2";
+  return "heat-near-1";
+}
+
+function renderPriorityNumberCell(value, item) {
+  const tone = priorityTone(item);
+  return `<td class="${tone}">${escapeHtml(value ?? "-")}</td>`;
 }
 
 async function readJsonResponse(response, fallbackMessage) {
@@ -295,24 +342,66 @@ function parseDateValue(value) {
   return Number.isNaN(parsed.getTime()) ? null : new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
 }
 
-function diffDays(start, end) {
-  const msPerDay = 24 * 60 * 60 * 1000;
-  return Math.max(0, Math.round((end - start) / msPerDay));
+function dateKey(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function addDays(date, amount) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + amount);
+  return next;
+}
+
+function isWorkingDay(date) {
+  const day = date.getDay();
+  return day !== 0 && day !== 6 && !INDONESIA_HOLIDAYS.has(dateKey(date));
+}
+
+function nextWorkingDay(date) {
+  let cursor = new Date(date);
+  while (!isWorkingDay(cursor)) {
+    cursor = addDays(cursor, 1);
+  }
+  return cursor;
+}
+
+function businessDaysInclusive(start, end) {
+  if (!start || !end) return null;
+  const firstDay = nextWorkingDay(start);
+  if (end < firstDay) return 0;
+  let cursor = new Date(firstDay);
+  let days = 0;
+  while (cursor <= end) {
+    if (isWorkingDay(cursor)) days += 1;
+    cursor = addDays(cursor, 1);
+  }
+  return days;
 }
 
 function getDurationDays(row, rule, mode) {
+  const start = parseDateValue(getValue(row, rule.startCol));
+  let end = parseDateValue(getValue(row, rule.endCol));
+  if (start) {
+    if (!end && mode === "running") {
+      const today = new Date();
+      end = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    }
+    if (end) return [businessDaysInclusive(start, end), "hari kerja"];
+  }
+
   const directDays = getNumber(row, rule.durationCol);
   if (directDays != null) return [directDays, "kolom durasi"];
 
-  const start = parseDateValue(getValue(row, rule.startCol));
-  let end = parseDateValue(getValue(row, rule.endCol));
   if (!start) return [null, "kolom SLA"];
   if (!end && mode === "running") {
     const today = new Date();
     end = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   }
   if (!end) return [null, "kolom SLA"];
-  return [diffDays(start, end), "estimasi tanggal"];
+  return [businessDaysInclusive(start, end), "hari kerja"];
 }
 
 function classifyDuration(days, rule) {
@@ -341,6 +430,28 @@ function classifyWithSla(days, rule, existingSla, mode) {
     return { ...byDuration, status: "AMAN", statusLabel: "Sesuai SLA", severity: 0, bucket: "Aman" };
   }
   return byDuration;
+}
+
+function prioritySortValue(item) {
+  const days = Number(item.days);
+  const limit = Number(item.limit);
+  if (!Number.isFinite(days) || !Number.isFinite(limit)) {
+    return { group: 9, distance: 999, days: -1 };
+  }
+  if (days > limit) {
+    return { group: 0, distance: 0, days: -days };
+  }
+  return { group: 1, distance: limit - days, days: -days };
+}
+
+function comparePriorityItems(a, b) {
+  const left = prioritySortValue(a);
+  const right = prioritySortValue(b);
+  return left.group - right.group
+    || left.distance - right.distance
+    || left.days - right.days
+    || a.processLabel.localeCompare(b.processLabel)
+    || a.kode_klaim.localeCompare(b.kode_klaim);
 }
 
 function processSheetRows(rows, columns, mode = "running") {
@@ -468,7 +579,7 @@ function processSheetRows(rows, columns, mode = "running") {
     });
   });
 
-  processItems.sort((a, b) => b.severity - a.severity || a.processLabel.localeCompare(b.processLabel) || a.kode_klaim.localeCompare(b.kode_klaim));
+  processItems.sort(comparePriorityItems);
   records.sort((a, b) => b.priorityScore - a.priorityScore || a.kode_klaim.localeCompare(b.kode_klaim));
   const payload = { columns, records, processItems, summary, mode };
   payload.lastUpdateData = getLastUpdateData(payload);
@@ -611,6 +722,21 @@ function exportClaimRows() {
 function resetPages() {
   state.pagination.priorityPage = 1;
   state.pagination.claimPage = 1;
+}
+
+function resetFilters() {
+  state.filters.branch = "ALL";
+  state.filters.status = "ALL";
+  state.filters.process = "ALL";
+  state.filters.search = "";
+  state.prioritySort.key = "priority";
+  state.prioritySort.direction = "asc";
+  resetPages();
+  if (els.branchFilter) els.branchFilter.value = "ALL";
+  if (els.statusFilter) els.statusFilter.value = "ALL";
+  if (els.processFilter) els.processFilter.value = "ALL";
+  if (els.searchInput) els.searchInput.value = "";
+  render();
 }
 
 function paginateRows(rows, page) {
@@ -869,11 +995,40 @@ function filteredProcessItems() {
   });
 }
 
+function compareValue(a, b, key) {
+  if (key === "priority") return comparePriorityItems(a, b);
+  if (key === "days" || key === "limit") {
+    return (Number(a[key]) || 0) - (Number(b[key]) || 0);
+  }
+  return String(a[key] ?? "").localeCompare(String(b[key] ?? ""), "id-ID", { numeric: true });
+}
+
+function sortPriorityRows(rows) {
+  const { key, direction } = state.prioritySort;
+  const multiplier = direction === "desc" ? -1 : 1;
+  return [...rows].sort((a, b) => {
+    const result = compareValue(a, b, key);
+    return result * multiplier || comparePriorityItems(a, b);
+  });
+}
+
+function sortIndicator(key) {
+  if (state.prioritySort.key !== key) return "";
+  return state.prioritySort.direction === "asc" ? "▲" : "▼";
+}
+
+function renderPrioritySortIndicators() {
+  document.querySelectorAll("[data-sort-icon]").forEach((icon) => {
+    icon.textContent = sortIndicator(icon.dataset.sortIcon);
+  });
+}
+
 function renderPriorityRows() {
-  const rows = filteredProcessItems().filter((item) => item.severity > 0 || state.filters.status !== "ALL");
+  const rows = sortPriorityRows(filteredProcessItems().filter((item) => item.severity > 0 || state.filters.status !== "ALL"));
   const page = paginateRows(rows, state.pagination.priorityPage);
   state.pagination.priorityPage = page.currentPage;
   els.priorityMeta.textContent = `${formatNumber(rows.length)} proses tampil`;
+  renderPrioritySortIndicators();
   if (!rows.length) {
     els.priorityRows.innerHTML = `<tr><td colspan="6">Tidak ada proses yang cocok dengan filter.</td></tr>`;
     renderPagination(els.priorityPagination, page, "priorityPage");
@@ -885,8 +1040,8 @@ function renderPriorityRows() {
         <td><strong>${item.kode_klaim}</strong></td>
         <td>${item.nama_kantor || "-"}</td>
         <td>${item.processLabel}</td>
-        <td>${item.days ?? "-"}</td>
-        <td>${item.limit}</td>
+        ${renderPriorityNumberCell(item.days, item)}
+        ${renderPriorityNumberCell(item.limit, item)}
         <td><span class="status ${item.status}">${item.statusLabel}</span></td>
       </tr>
     `)
@@ -1014,18 +1169,18 @@ function renderRecapRows() {
       <tr>
         <td><strong>${escapeHtml(row.kantor)}</strong></td>
         <td class="total-cell">${formatNumber(row.total)}</td>
-        ${renderHeatCell(row.p5)}
-        ${renderHeatCell(row.p6)}
-        ${renderHeatCell(row.p7)}
-        ${renderHeatCell(row.pOver, true)}
-        ${renderHeatCell(row.v8)}
-        ${renderHeatCell(row.v9)}
-        ${renderHeatCell(row.v10)}
-        ${renderHeatCell(row.vOver, true)}
-        ${renderHeatCell(row.b5)}
-        ${renderHeatCell(row.b6)}
-        ${renderHeatCell(row.b7)}
-        ${renderHeatCell(row.bOver, true)}
+        ${renderHeatCell(row.p5, "heat-near-1")}
+        ${renderHeatCell(row.p6, "heat-near-2")}
+        ${renderHeatCell(row.p7, "heat-near-3")}
+        ${renderHeatCell(row.pOver, "heat-over-strong")}
+        ${renderHeatCell(row.v8, "heat-near-1")}
+        ${renderHeatCell(row.v9, "heat-near-2")}
+        ${renderHeatCell(row.v10, "heat-near-3")}
+        ${renderHeatCell(row.vOver, "heat-over-strong")}
+        ${renderHeatCell(row.b5, "heat-near-1")}
+        ${renderHeatCell(row.b6, "heat-near-2")}
+        ${renderHeatCell(row.b7, "heat-near-3")}
+        ${renderHeatCell(row.bOver, "heat-over-strong")}
       </tr>
     `)
     .join("");
@@ -1033,18 +1188,18 @@ function renderRecapRows() {
     <tr class="recap-total-row">
       <td>Total</td>
       <td class="total-cell">${formatNumber(totalRow.total)}</td>
-      ${renderHeatCell(totalRow.p5)}
-      ${renderHeatCell(totalRow.p6)}
-      ${renderHeatCell(totalRow.p7)}
-      ${renderHeatCell(totalRow.pOver, true)}
-      ${renderHeatCell(totalRow.v8)}
-      ${renderHeatCell(totalRow.v9)}
-      ${renderHeatCell(totalRow.v10)}
-      ${renderHeatCell(totalRow.vOver, true)}
-      ${renderHeatCell(totalRow.b5)}
-      ${renderHeatCell(totalRow.b6)}
-      ${renderHeatCell(totalRow.b7)}
-      ${renderHeatCell(totalRow.bOver, true)}
+      ${renderHeatCell(totalRow.p5, "heat-near-1")}
+      ${renderHeatCell(totalRow.p6, "heat-near-2")}
+      ${renderHeatCell(totalRow.p7, "heat-near-3")}
+      ${renderHeatCell(totalRow.pOver, "heat-over-strong")}
+      ${renderHeatCell(totalRow.v8, "heat-near-1")}
+      ${renderHeatCell(totalRow.v9, "heat-near-2")}
+      ${renderHeatCell(totalRow.v10, "heat-near-3")}
+      ${renderHeatCell(totalRow.vOver, "heat-over-strong")}
+      ${renderHeatCell(totalRow.b5, "heat-near-1")}
+      ${renderHeatCell(totalRow.b6, "heat-near-2")}
+      ${renderHeatCell(totalRow.b7, "heat-near-3")}
+      ${renderHeatCell(totalRow.bOver, "heat-over-strong")}
     </tr>`;
 }
 
@@ -1137,6 +1292,8 @@ els.searchInput.addEventListener("input", (event) => {
   render();
 });
 
+els.resetFilters.addEventListener("click", resetFilters);
+
 els.clearData.addEventListener("click", async () => {
   await clearStoredData();
   state.data = null;
@@ -1167,6 +1324,20 @@ document.addEventListener("change", (event) => {
   state.pagination.pageSize = Number(select.value);
   resetPages();
   render();
+});
+
+document.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-priority-sort]");
+  if (!button) return;
+  const key = button.dataset.prioritySort;
+  if (state.prioritySort.key === key) {
+    state.prioritySort.direction = state.prioritySort.direction === "asc" ? "desc" : "asc";
+  } else {
+    state.prioritySort.key = key;
+    state.prioritySort.direction = key === "days" || key === "limit" ? "desc" : "asc";
+  }
+  state.pagination.priorityPage = 1;
+  renderPriorityRows();
 });
 
 async function init() {

@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Monitoring SLA Klaim</title>
-    <link rel="stylesheet" href="styles.css?v=20260807-3">
+    <link rel="stylesheet" href="styles.css?v=20260810-6">
   </head>
   <body>
     <main class="app-shell">
@@ -42,7 +42,7 @@
 
       <section class="notice" id="notice">
         Data diproses di server lokal <strong>127.0.0.1</strong> atau langsung di browser saat dibuka dari GitHub.
-        <div class="notice-meta">Last update data: <strong>-</strong> <span>Tanggal data terakhir: <strong>-</strong></span></div>
+        <div class="notice-meta">Last update data: <strong>-</strong> <span>Last submit invoice: <strong>-</strong></span></div>
       </section>
 
       <section class="panel controls">
@@ -74,6 +74,14 @@
         <div class="control-group wide">
           <label for="searchInput">Cari kode klaim / kantor / tenaga kerja</label>
           <input id="searchInput" type="search" placeholder="Ketik kata kunci">
+        </div>
+        <div class="control-group reset-filter-group">
+          <label>&nbsp;</label>
+          <button id="resetFilters" class="filter-reset-button" type="button" title="Reset filter" aria-label="Reset filter">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3 12a9 9 0 1 0 3-6.7M3 4v6h6" />
+            </svg>
+          </button>
         </div>
       </section>
 
@@ -128,15 +136,15 @@
             </div>
           </div>
           <div class="table-wrap">
-            <table>
+            <table class="priority-table">
               <thead>
                 <tr>
-                  <th>Kode Klaim</th>
-                  <th>Kantor</th>
-                  <th>Proses</th>
-                  <th>Hari</th>
-                  <th>Batas</th>
-                  <th>Status</th>
+                  <th><button class="sort-button" type="button" data-priority-sort="kode_klaim">Kode Klaim <span data-sort-icon="kode_klaim"></span></button></th>
+                  <th><button class="sort-button" type="button" data-priority-sort="nama_kantor">Kantor <span data-sort-icon="nama_kantor"></span></button></th>
+                  <th><button class="sort-button" type="button" data-priority-sort="processLabel">Proses <span data-sort-icon="processLabel"></span></button></th>
+                  <th><button class="sort-button" type="button" data-priority-sort="days">Hari <span data-sort-icon="days"></span></button></th>
+                  <th><button class="sort-button" type="button" data-priority-sort="limit">Batas <span data-sort-icon="limit"></span></button></th>
+                  <th><button class="sort-button" type="button" data-priority-sort="statusLabel">Status <span data-sort-icon="statusLabel"></span></button></th>
                 </tr>
               </thead>
               <tbody id="priorityRows"></tbody>
@@ -182,6 +190,6 @@
         </section>
       </div>
     </main>
-    <script src="app.js?v=20260807-3"></script>
+    <script src="app.js?v=20260810-6"></script>
   </body>
 </html>

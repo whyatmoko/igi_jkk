@@ -1,5 +1,6 @@
 import json
 import math
+from datetime import date, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
@@ -14,6 +15,33 @@ BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR
 MAX_UPLOAD_BYTES = 30 * 1024 * 1024
 SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ6p-wOSp1QP31f8g5CbmLsinCmoHcaR5I-scRqj2qYNWmNLKZKReBg52u9SCKclmU9yGPWJBvLbSQW/pub?gid=0&single=true&output=csv"
+INDONESIA_HOLIDAYS = {
+    "2026-01-01",
+    "2026-01-16",
+    "2026-02-16",
+    "2026-02-17",
+    "2026-03-18",
+    "2026-03-19",
+    "2026-03-20",
+    "2026-03-21",
+    "2026-03-22",
+    "2026-03-23",
+    "2026-03-24",
+    "2026-04-03",
+    "2026-04-05",
+    "2026-05-01",
+    "2026-05-14",
+    "2026-05-15",
+    "2026-05-27",
+    "2026-05-28",
+    "2026-05-31",
+    "2026-06-01",
+    "2026-06-16",
+    "2026-08-17",
+    "2026-08-25",
+    "2026-12-24",
+    "2026-12-25",
+}
 
 RULES = {
     "pemeriksaan": {
@@ -81,19 +109,58 @@ def normalize_sla(value):
     return str(value).strip().upper()
 
 
-def get_duration_days(row, rule):
-    direct_days = get_number(row, rule.get("duration_col"))
-    if direct_days is not None:
-        return direct_days, "kolom durasi"
+def date_key(value):
+    return value.strftime("%Y-%m-%d")
+
+
+def is_working_day(value):
+    return value.weekday() < 5 and date_key(value) not in INDONESIA_HOLIDAYS
+
+
+def next_working_day(value):
+    cursor = value
+    while not is_working_day(cursor):
+        cursor = cursor + timedelta(days=1)
+    return cursor
+
+
+def business_days_inclusive(start, end):
+    if start is None or end is None:
+        return None
+    first_day = next_working_day(start)
+    if end < first_day:
+        return 0
+    cursor = first_day
+    days = 0
+    while cursor <= end:
+        if is_working_day(cursor):
+            days += 1
+        cursor = cursor + timedelta(days=1)
+    return days
+
+
+def get_duration_days(row, rule, mode):
+    today = pd.Timestamp(date.today())
 
     start_col = rule.get("start_col")
     end_col = rule.get("end_col")
     start = pd.to_datetime(row.get(start_col), errors="coerce") if start_col else None
     end = pd.to_datetime(row.get(end_col), errors="coerce") if end_col else None
+    if not pd.isna(start):
+        if pd.isna(end) and mode == "running":
+            end = today
+        if not pd.isna(end):
+            days = business_days_inclusive(start.normalize().date(), end.normalize().date())
+            return float(days), "hari kerja"
+
+    direct_days = get_number(row, rule.get("duration_col"))
+    if direct_days is not None:
+        return direct_days, "kolom durasi"
+
     if pd.isna(start) or pd.isna(end):
         return None, "kolom SLA"
-    days = (end.normalize() - start.normalize()).days
-    return max(float(days), 0.0), "estimasi tanggal"
+    days = business_days_inclusive(start.normalize().date(), end.normalize().date())
+    return float(days), "hari kerja"
 
 
 def classify_duration(days, rule):
@@ -154,6 +221,21 @@ def classify_with_sla(days, rule, existing_sla, mode):
             "bucket": "Aman",
         }
     return by_duration
+
+
+def priority_sort_key(item):
+    days = item.get("days")
+    limit = item.get("limit")
+    if days is None or limit is None:
+        return (9, 999, 0, item["processLabel"], item["kode_klaim"])
+    try:
+        days_value = float(days)
+        limit_value = float(limit)
+    except (TypeError, ValueError):
+        return (9, 999, 0, item["processLabel"], item["kode_klaim"])
+    if days_value > limit_value:
+        return (0, 0, -days_value, item["processLabel"], item["kode_klaim"])
+    return (1, limit_value - days_value, -days_value, item["processLabel"], item["kode_klaim"])
 
 
 def load_workbook(file_bytes, filename):
@@ -243,7 +325,7 @@ def process_dataframe(df, mode="final"):
 
         for key, rule in RULES.items():
             existing_sla = normalize_sla(row.get(rule["sla_col"]))
-            days, day_source = get_duration_days(row, rule)
+            days, day_source = get_duration_days(row, rule, mode)
             classification = classify_with_sla(days, rule, existing_sla, mode)
             mismatch = bool(existing_sla) and (
                 ("OVER" in existing_sla and classification["status"] != "OVER")
@@ -332,7 +414,7 @@ def process_dataframe(df, mode="final"):
             "checks": checks,
         })
 
-    process_items.sort(key=lambda item: (-item["severity"], item["processLabel"], item["kode_klaim"]))
+    process_items.sort(key=priority_sort_key)
     records.sort(key=lambda item: (-item["priorityScore"], item["kode_klaim"]))
 
     return {
