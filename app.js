@@ -156,6 +156,10 @@ function isPaidClaim(claim) {
   return flag === "1" || flag === "TRUE" || flag === "YA";
 }
 
+function paidStatusLabel(claim) {
+  return isPaidClaim(claim) ? "Sudah Terbayar" : "Belum Terbayar";
+}
+
 function formatShortDate(value) {
   const date = parseDateValue(value);
   if (!date) return "-";
@@ -485,7 +489,8 @@ function processSheetRows(rows, columns, mode = "running") {
     const kantorTk = getValue(row, "nama_kantor_tk");
     const namaTk = getValue(row, "nama_tk");
     const perusahaan = getValue(row, "nama_perusahaan") || getValue(row, "nama_faskes_detil");
-    const statusKlaim = getValue(row, "status_klaim") || (getValue(row, "flag_bayar") === "1" ? "BAYAR" : getValue(row, "flag_bayar"));
+    const flagBayar = getValue(row, "flag_bayar");
+    const statusKlaim = getValue(row, "status_klaim") || (flagBayar === "1" ? "BAYAR" : flagBayar);
     const checks = {};
     let maxSeverity = 0;
     const openProcesses = [];
@@ -540,6 +545,7 @@ function processSheetRows(rows, columns, mode = "running") {
         bucket: classification.bucket,
         slaColumn: existingSla,
         mismatch,
+        flag_bayar: flagBayar,
       });
     });
 
@@ -565,7 +571,7 @@ function processSheetRows(rows, columns, mode = "running") {
       jenis_penetapan: getValue(row, "jenis_penetapan"),
       nama_faskes_detil: getValue(row, "nama_faskes_detil"),
       status_klaim: statusKlaim,
-      flag_bayar: getValue(row, "flag_bayar"),
+      flag_bayar: flagBayar,
       tgl_rekam: getValue(row, "tgl_rekam"),
       tanggal_tarik_data: getValue(row, "tanggal_tarik_data"),
       tgl_submit_invoice: getValue(row, "tgl_submit_invoice"),
@@ -703,6 +709,7 @@ function exportClaimRows() {
     claim.nama_tk || "-",
     claim.nama_perusahaan || "-",
     claim.status_klaim || "-",
+    paidStatusLabel(claim),
     statusLabel(claim.overallStatus),
     claim.checks.pemeriksaan?.days ?? "-",
     claim.checks.pemeriksaan?.statusLabel ?? "-",
@@ -714,7 +721,7 @@ function exportClaimRows() {
   downloadExcelFile(
     "monitoring-kode-klaim",
     "Monitoring Klaim",
-    ["Kode Klaim", "Kantor", "Nama TK", "Faskes / Perusahaan", "Status Klaim", "Overall", "Pemeriksaan Hari", "Status Pemeriksaan", "Verifikasi Hari", "Status Verifikasi", "Pembayaran Hari", "Status Pembayaran"],
+    ["Kode Klaim", "Kantor", "Nama TK", "Faskes / Perusahaan", "Status Klaim", "Status Bayar", "Overall", "Pemeriksaan Hari", "Status Pemeriksaan", "Verifikasi Hari", "Status Verifikasi", "Pembayaran Hari", "Status Pembayaran"],
     rows
   );
 }
@@ -938,7 +945,7 @@ function renderSummary() {
     els.summaryCards.innerHTML = `
       <article class="card"><span>Total Klaim</span><strong>0</strong></article>
       <article class="card card-over"><span>Over SLA</span><strong>0</strong></article>
-      <article class="card card-paid"><span>Over SLA Klaim Selesai</span><strong>0 / 0 <small>(0%)</small></strong><em>Klaim yang dibayar sd tanggal -</em></article>
+      <article class="card card-paid"><span>Total Klaim Over SLA (Selesai)</span><strong>0 / 0 <small>(0%)</small></strong><em>Klaim yang terbayar</em></article>
       <article class="card card-warning"><span>Mendekati SLA</span><strong>0</strong></article>
     `;
     return;
@@ -947,25 +954,27 @@ function renderSummary() {
   const totals = claims.reduce(
     (acc, claim) => {
       acc.total += 1;
-      if (claim.overallStatus === "OVER") acc.over += 1;
-      else if (claim.overallStatus === "WARNING") acc.warning += 1;
-      else acc.safe += 1;
       if (isPaidClaim(claim)) {
         acc.paid += 1;
         if (claim.overallStatus === "OVER") acc.paidOver += 1;
+      } else if (claim.overallStatus === "OVER") {
+        acc.over += 1;
+      } else if (claim.overallStatus === "WARNING") {
+        acc.warning += 1;
+      } else {
+        acc.safe += 1;
       }
       return acc;
     },
     { total: 0, over: 0, warning: 0, safe: 0, paid: 0, paidOver: 0 }
   );
   const paidSafePercent = totals.paid ? ((totals.paid - totals.paidOver) / totals.paid) * 100 : 0;
-  const lastPaidDate = formatShortDate(getLastPaidDate(claims));
   els.summaryCards.innerHTML = `
-    <article class="card"><span>Total Klaim</span><strong>${formatNumber(totals.total)}</strong></article>
-    <article class="card card-over"><span>Over SLA</span><strong>${formatNumber(totals.over)}</strong></article>
-    <article class="card card-paid"><span>Over SLA Klaim Selesai</span><strong>${formatNumber(totals.paidOver)} / ${formatNumber(totals.paid)} <small>(${formatPercent(paidSafePercent)}%)</small></strong><em>Klaim yang dibayar sd tanggal ${escapeHtml(lastPaidDate)}</em></article>
-    <article class="card card-warning"><span>Mendekati SLA</span><strong>${formatNumber(totals.warning)}</strong></article>
-  `;
+      <article class="card"><span>Total Klaim</span><strong>${formatNumber(totals.total)}</strong></article>
+      <article class="card card-over"><span>Over SLA</span><strong>${formatNumber(totals.over)}</strong></article>
+      <article class="card card-paid"><span>Total Klaim Over SLA (Selesai)</span><strong>${formatNumber(totals.paidOver)} / ${formatNumber(totals.paid)} <small>(${formatPercent(paidSafePercent)}%)</small></strong><em>Klaim yang terbayar</em></article>
+      <article class="card card-warning"><span>Mendekati SLA</span><strong>${formatNumber(totals.warning)}</strong></article>
+    `;
 }
 
 function matchesSearch(item) {
@@ -988,6 +997,7 @@ function matchesSearch(item) {
 function filteredProcessItems() {
   const items = state.data?.processItems || [];
   return items.filter((item) => {
+    if (isPaidClaim(item)) return false;
     if (state.filters.branch !== "ALL" && item.nama_kantor !== state.filters.branch) return false;
     if (state.filters.process !== "ALL" && item.process !== state.filters.process) return false;
     if (state.filters.status !== "ALL" && item.status !== state.filters.status) return false;
@@ -1102,11 +1112,18 @@ function buildRecapRows(claims) {
         kodeKantor,
         kantor,
         total: new Set(),
+        paidSafe: new Set(),
+        paidOver: new Set(),
         buckets: emptyBuckets(),
       });
     }
     const group = groups.get(key);
     group.total.add(claim.kode_klaim);
+    if (isPaidClaim(claim)) {
+      if (claim.overallStatus === "OVER") group.paidOver.add(claim.kode_klaim);
+      else group.paidSafe.add(claim.kode_klaim);
+      return;
+    }
     const checks = claim.checks || {};
     const pemeriksaan = Number(checks.pemeriksaan?.days);
     const verifikasi = Number(checks.verifikasi?.days);
@@ -1137,6 +1154,8 @@ function buildRecapRows(claims) {
         kodeKantor: group.kodeKantor,
         kantor: group.kantor,
         total: group.total.size,
+        paidSafe: group.paidSafe.size,
+        paidOver: group.paidOver.size,
         totalOver,
         totalWatch,
         ...counts,
@@ -1152,7 +1171,7 @@ function renderRecapRows() {
   const totalWarning = rows.reduce((sum, row) => sum + row.totalWatch, 0);
   els.recapMeta.textContent = `${formatNumber(totalOver)} over, ${formatNumber(totalWarning)} akan over`;
   if (!rows.length) {
-    els.recapRows.innerHTML = `<tr><td colspan="14">Belum ada rekap yang cocok dengan filter.</td></tr>`;
+    els.recapRows.innerHTML = `<tr><td colspan="16">Belum ada rekap yang cocok dengan filter.</td></tr>`;
     return;
   }
   const totalRow = rows.reduce(
@@ -1162,12 +1181,14 @@ function renderRecapRows() {
       });
       return acc;
     },
-    { total: 0, p5: 0, p6: 0, p7: 0, pOver: 0, v8: 0, v9: 0, v10: 0, vOver: 0, b5: 0, b6: 0, b7: 0, bOver: 0 }
+    { total: 0, paidSafe: 0, paidOver: 0, p5: 0, p6: 0, p7: 0, pOver: 0, v8: 0, v9: 0, v10: 0, vOver: 0, b5: 0, b6: 0, b7: 0, bOver: 0 }
   );
   const bodyRows = rows
     .map((row) => `
       <tr>
         <td><strong>${escapeHtml(row.kantor)}</strong></td>
+        <td class="complete-cell complete-safe">${formatNumber(row.paidSafe)}</td>
+        <td class="complete-cell complete-over">${formatNumber(row.paidOver)}</td>
         <td class="total-cell">${formatNumber(row.total)}</td>
         ${renderHeatCell(row.p5, "heat-near-1")}
         ${renderHeatCell(row.p6, "heat-near-2")}
@@ -1187,6 +1208,8 @@ function renderRecapRows() {
   els.recapRows.innerHTML = `${bodyRows}
     <tr class="recap-total-row">
       <td>Total</td>
+      <td class="complete-cell complete-safe">${formatNumber(totalRow.paidSafe)}</td>
+      <td class="complete-cell complete-over">${formatNumber(totalRow.paidOver)}</td>
       <td class="total-cell">${formatNumber(totalRow.total)}</td>
       ${renderHeatCell(totalRow.p5, "heat-near-1")}
       ${renderHeatCell(totalRow.p6, "heat-near-2")}
@@ -1209,7 +1232,7 @@ function renderClaimList() {
   state.pagination.claimPage = page.currentPage;
   els.claimMeta.textContent = `${formatNumber(claims.length)} klaim tampil`;
   if (!claims.length) {
-    els.claimList.innerHTML = `<tr><td colspan="12">Belum ada klaim yang cocok dengan filter.</td></tr>`;
+    els.claimList.innerHTML = `<tr><td colspan="13">Belum ada klaim yang cocok dengan filter.</td></tr>`;
     renderPagination(els.claimPagination, page, "claimPage");
     return;
   }
@@ -1221,6 +1244,7 @@ function renderClaimList() {
         <td>${escapeHtml(claim.nama_tk)}</td>
         <td>${escapeHtml(claim.nama_perusahaan)}</td>
         <td>${escapeHtml(claim.status_klaim)}</td>
+        <td><span class="paid-status ${isPaidClaim(claim) ? "paid" : "unpaid"}">${paidStatusLabel(claim)}</span></td>
         <td><span class="status ${claim.overallStatus}">${statusLabel(claim.overallStatus)}</span></td>
         <td>${renderDurationCell(claim.checks.pemeriksaan)}</td>
         <td><span class="status ${claim.checks.pemeriksaan.status}">${claim.checks.pemeriksaan.statusLabel}</span></td>

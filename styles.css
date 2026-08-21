@@ -619,13 +619,32 @@ th {
   white-space: nowrap;
 }
 
+.paid-status {
+  display: inline-flex;
+  padding: 5px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.paid-status.paid {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.paid-status.unpaid {
+  background: #f1f5f9;
+  color: #475569;
+}
+
 .muted {
   color: var(--muted);
   font-size: 12px;
 }
 
 .claim-table {
-  min-width: 1180px;
+  min-width: 1280px;
 }
 
 .group-pemeriksaan {
@@ -640,23 +659,44 @@ th {
   background: #0f766e;
 }
 
+.group-selesai {
+  background: #334155;
+}
+
 .recap-table {
-  min-width: 1320px;
+  min-width: 0;
+  width: 100%;
   table-layout: fixed;
   border: 1px solid var(--line);
+  font-size: 11px;
+}
+
+.recap-col-branch {
+  width: 15%;
+}
+
+.recap-col-done {
+  width: 6.5%;
+}
+
+.recap-col-total {
+  width: 7%;
+}
+
+.recap-col-bucket {
+  width: 5.4%;
 }
 
 .recap-table .group-head {
   color: white;
   text-align: center;
   font-weight: 900;
-  height: 34px;
-  height: 42px;
+  height: 32px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.35);
 }
 
 .recap-table .bucket-head {
-  padding: 6px 8px;
+  padding: 4px 3px;
   line-height: 1.1;
   white-space: normal;
 }
@@ -672,7 +712,7 @@ th {
 
 .recap-table .bucket-head small {
   margin-top: 2px;
-  font-size: 9px;
+  font-size: 8px;
   color: #64748b;
 }
 
@@ -688,8 +728,13 @@ th {
   background: #ccfbf1;
 }
 
+.recap-table .selesai-sub {
+  background: #e2e8f0;
+}
+
 .recap-table td,
 .recap-table th {
+  padding: 6px 5px;
   text-align: center;
   border-right: 1px solid #edf2f7;
 }
@@ -702,24 +747,33 @@ th {
 .recap-table td:first-child,
 .recap-table th:first-child {
   text-align: left;
-  width: 260px;
+  width: auto;
 }
 
-.recap-table th:nth-child(2),
-.recap-table td:nth-child(2) {
-  width: 110px;
-  text-align: center;
-}
-
-.recap-table th:nth-child(n + 3),
-.recap-table td:nth-child(n + 3) {
-  width: 78px;
-  text-align: center;
+.recap-table td:first-child strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .total-cell {
   font-weight: 800;
   background: #f8fafc;
+}
+
+.complete-cell {
+  font-weight: 900;
+}
+
+.complete-safe {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.complete-over {
+  background: #fee2e2;
+  color: #991b1b;
 }
 
 .recap-total-row td {
@@ -779,7 +833,8 @@ th {
 .claim-table td:nth-child(1),
 .claim-table td:nth-child(7),
 .claim-table td:nth-child(9),
-.claim-table td:nth-child(11) {
+.claim-table td:nth-child(11),
+.claim-table td:nth-child(13) {
   white-space: nowrap;
 }
 

@@ -378,6 +378,7 @@ def process_dataframe(df, mode="final"):
                 "bucket": bucket,
                 "slaColumn": existing_sla,
                 "mismatch": mismatch,
+                "flag_bayar": flag_bayar,
             })
 
         if max_severity >= 3:

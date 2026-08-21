@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Monitoring SLA Klaim</title>
-    <link rel="stylesheet" href="styles.css?v=20260810-7">
+    <link rel="stylesheet" href="styles.css?v=20260821-4">
   </head>
   <body>
     <main class="app-shell">
@@ -94,15 +94,25 @@
         </div>
         <div class="table-wrap">
           <table class="recap-table">
+            <colgroup>
+              <col class="recap-col-branch">
+              <col class="recap-col-done">
+              <col class="recap-col-done">
+              <col class="recap-col-total">
+              <col span="12" class="recap-col-bucket">
+            </colgroup>
             <thead>
               <tr>
                 <th rowspan="2">Cabang</th>
+                <th colspan="2" class="group-head group-selesai">Selesai</th>
                 <th rowspan="2">Total Klaim</th>
                 <th colspan="4" class="group-head group-pemeriksaan">Lama Pemeriksaan</th>
                 <th colspan="4" class="group-head group-verifikasi">Lama Verifikasi</th>
                 <th colspan="4" class="group-head group-pembayaran">Lama Pembayaran</th>
               </tr>
               <tr>
+                <th class="bucket-head selesai-sub"><span>SLA</span><small>Sesuai</small></th>
+                <th class="bucket-head selesai-sub"><span>Over</span><small>SLA</small></th>
                 <th class="bucket-head pemeriksaan-sub"><span>5</span><small>Hari</small></th>
                 <th class="bucket-head pemeriksaan-sub"><span>6</span><small>Hari</small></th>
                 <th class="bucket-head pemeriksaan-sub"><span>7</span><small>Hari</small></th>
@@ -174,6 +184,7 @@
                   <th>Nama TK</th>
                   <th>Faskes / Perusahaan</th>
                   <th>Status Klaim</th>
+                  <th>Status Bayar</th>
                   <th>Overall</th>
                   <th>Pemeriksaan</th>
                   <th>Status Pemeriksaan</th>
@@ -190,6 +201,6 @@
         </section>
       </div>
     </main>
-    <script src="app.js?v=20260810-7"></script>
+    <script src="app.js?v=20260821-4"></script>
   </body>
 </html>
