@@ -1,11 +1,16 @@
 import json
 import math
+import time
+import threading
 from datetime import date, timedelta
+from html.parser import HTMLParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 import cgi
 import io
+import os
+import subprocess
 import urllib.request
 
 import pandas as pd
@@ -13,8 +18,28 @@ import pandas as pd
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR
+DATA_DIR = BASE_DIR / "data"
+PROGRAM_CSV_PATH = DATA_DIR / "sla_program.csv"
+PROGRAM_BAT_PATH = BASE_DIR / "tarik_sla_program.bat"
+PROGRAM_BAT_RUNNER_PATH = DATA_DIR / "run_tarik_sla_program.cmd"
+VALID_OFFICE_CODES = {f"L{index:02d}" for index in range(35)}
 MAX_UPLOAD_BYTES = 30 * 1024 * 1024
-SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ6p-wOSp1QP31f8g5CbmLsinCmoHcaR5I-scRqj2qYNWmNLKZKReBg52u9SCKclmU9yGPWJBvLbSQW/pub?gid=0&single=true&output=csv"
+SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ6p-wOSp1QP31f8g5CbmLsinCmoHcaR5I-scRqj2qYNWmNLKZKReBg52u9SCKclmU9yGPWJBvLbSQW/pub?gid=802130436&single=true&output=csv"
+SHEET_HTML_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ6p-wOSp1QP31f8g5CbmLsinCmoHcaR5I-scRqj2qYNWmNLKZKReBg52u9SCKclmU9yGPWJBvLbSQW/pubhtml/sheet?headers=false&gid=802130436"
+PROGRAM_SOURCE_URL = "https://smile2.bpjsketenagakerjaan.go.id/smile/mod_pn/form/pn5053_form_detil_sla.php"
+PROGRAM_PULL_DELAY_SECONDS = 2
+PULL_STATUS_LOCK = threading.Lock()
+PULL_STATUS = {
+    "running": False,
+    "current": "-",
+    "processed": 0,
+    "total": 0,
+    "success": 0,
+    "failed": 0,
+    "error": "",
+    "hasData": False,
+    "message": "Belum ada proses tarik data.",
+}
 INDONESIA_HOLIDAYS = {
     "2026-01-01",
     "2026-01-16",
@@ -249,9 +274,295 @@ def load_workbook(file_bytes, filename):
 
 
 def load_published_sheet():
-    with urllib.request.urlopen(SHEET_CSV_URL, timeout=45) as response:
-        csv_bytes = response.read()
-    return pd.read_csv(io.BytesIO(csv_bytes))
+    request = urllib.request.Request(SHEET_HTML_URL, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(request, timeout=60) as response:
+        html_bytes = response.read()
+    frame = parse_html_table(html_bytes)
+    first_col = str(frame.columns[0]).strip() if len(frame.columns) else ""
+    if first_col.isdigit():
+        frame = frame.drop(columns=[frame.columns[0]])
+    return frame
+
+
+def program_csv_payload(df, file_name="sla_program.csv", last_modified=None):
+    df = df.fillna("")
+    records = [
+        {str(column): as_jsonable(value) for column, value in row.items()}
+        for row in df.to_dict(orient="records")
+    ]
+    if last_modified is None and PROGRAM_CSV_PATH.exists():
+        last_modified = date.fromtimestamp(PROGRAM_CSV_PATH.stat().st_mtime).isoformat()
+    return {
+        "columns": [str(column).strip() for column in df.columns],
+        "records": records,
+        "rowCount": int(len(records)),
+        "fileName": file_name,
+        "lastModified": last_modified,
+    }
+
+
+def load_program_csv():
+    office_files = sorted(DATA_DIR.glob("L[0-9][0-9].csv"))
+    if office_files:
+        frames = [pd.read_csv(file_path, dtype=str, keep_default_na=False) for file_path in office_files]
+        df = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+        last_modified = max(date.fromtimestamp(file_path.stat().st_mtime).isoformat() for file_path in office_files)
+        return program_csv_payload(df, f"{len(office_files)} file cabang SLA Program", last_modified)
+    if not PROGRAM_CSV_PATH.exists():
+        raise FileNotFoundError("File CSV lokal belum ada. Jalankan modul tarik data manual terlebih dahulu.")
+    df = pd.read_csv(PROGRAM_CSV_PATH, dtype=str, keep_default_na=False)
+    return program_csv_payload(df)
+
+
+def kantor_codes():
+    return [f"L{index:02d}" for index in range(34, -1, -1)]
+
+
+def launch_sla_program_bat(selected_codes):
+    DATA_DIR.mkdir(exist_ok=True)
+    codes_arg = ",".join(selected_codes)
+    runner_lines = [
+        "@echo off",
+        f'cd /d "{BASE_DIR}"',
+    ]
+    if codes_arg:
+        runner_lines.append(f'call "{PROGRAM_BAT_PATH}" "{codes_arg}"')
+    else:
+        runner_lines.append(f'call "{PROGRAM_BAT_PATH}"')
+    PROGRAM_BAT_RUNNER_PATH.write_text("\r\n".join(runner_lines) + "\r\n", encoding="utf-8")
+    creationflags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+    subprocess.Popen(
+        ["cmd.exe", "/k", str(PROGRAM_BAT_RUNNER_PATH)],
+        cwd=str(BASE_DIR),
+        creationflags=creationflags,
+    )
+    return PROGRAM_BAT_RUNNER_PATH
+
+
+def set_pull_status(**updates):
+    with PULL_STATUS_LOCK:
+        PULL_STATUS.update(updates)
+
+
+def get_pull_status():
+    with PULL_STATUS_LOCK:
+        return dict(PULL_STATUS)
+
+
+def flatten_columns(columns):
+    clean_columns = []
+    for column in columns:
+        if isinstance(column, tuple):
+            parts = [str(part).strip() for part in column if str(part).strip() and not str(part).startswith("Unnamed")]
+            clean_columns.append("_".join(parts) if parts else "kolom")
+        else:
+            clean_columns.append(str(column).strip())
+    return clean_columns
+
+
+class SimpleTableParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.tables = []
+        self._table_depth = 0
+        self._in_row = False
+        self._in_cell = False
+        self._current_table = []
+        self._current_row = []
+        self._current_cell = []
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.lower()
+        if tag == "table":
+            self._table_depth += 1
+            if self._table_depth == 1:
+                self._current_table = []
+        elif self._table_depth and tag == "tr":
+            self._in_row = True
+            self._current_row = []
+        elif self._table_depth and tag in {"td", "th"}:
+            self._in_cell = True
+            self._current_cell = []
+
+    def handle_data(self, data):
+        if self._in_cell:
+            self._current_cell.append(data)
+
+    def handle_endtag(self, tag):
+        tag = tag.lower()
+        if self._table_depth and tag in {"td", "th"} and self._in_cell:
+            text = " ".join("".join(self._current_cell).split())
+            self._current_row.append(text)
+            self._in_cell = False
+            self._current_cell = []
+        elif self._table_depth and tag == "tr" and self._in_row:
+            if any(cell for cell in self._current_row):
+                self._current_table.append(self._current_row)
+            self._in_row = False
+            self._current_row = []
+        elif tag == "table" and self._table_depth:
+            self._table_depth -= 1
+            if self._table_depth == 0 and self._current_table:
+                self.tables.append(self._current_table)
+                self._current_table = []
+
+
+def unique_columns(columns):
+    seen = {}
+    unique = []
+    for index, column in enumerate(columns, start=1):
+        name = str(column).strip() or f"kolom_{index}"
+        count = seen.get(name, 0)
+        seen[name] = count + 1
+        unique.append(name if count == 0 else f"{name}_{count + 1}")
+    return unique
+
+
+def table_to_frame(table):
+    rows = [row for row in table if any(cell for cell in row)]
+    if len(rows) < 2:
+        raise ValueError("Tabel tidak memiliki baris data.")
+    width = max(len(row) for row in rows)
+    padded = [row + [""] * (width - len(row)) for row in rows]
+    headers = unique_columns(padded[0])
+    return pd.DataFrame(padded[1:], columns=headers).astype(str)
+
+
+def parse_html_table(raw):
+    html = raw.decode("utf-8", errors="ignore")
+    lowered = html.lower()
+    if "password" in lowered and ("login" in lowered or "username" in lowered or "user id" in lowered):
+        raise ValueError("Respons terlihat sebagai halaman login, bukan tabel data.")
+    parser = SimpleTableParser()
+    parser.feed(html)
+    if not parser.tables:
+        raise ValueError("Tidak ada tabel data pada respons.")
+    return max((table_to_frame(table) for table in parser.tables), key=lambda frame: frame.shape[0] * max(frame.shape[1], 1))
+
+
+def fetch_program_table(kdktr):
+    query = urlencode({"kdktr": kdktr, "tgl1": "", "tgl2": ""})
+    url = f"{PROGRAM_SOURCE_URL}?{query}"
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "SLA-Monitoring-Local/1.0",
+            "Accept": "text/html,application/xhtml+xml,application/xml,text/csv,*/*",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=30) as response:
+        raw = response.read()
+        content_type = response.headers.get("Content-Type", "")
+    if "csv" in content_type.lower():
+        frame = pd.read_csv(io.BytesIO(raw), dtype=str, keep_default_na=False)
+    else:
+        frame = parse_html_table(raw)
+    frame.columns = flatten_columns(frame.columns)
+    frame.insert(0, "kdktr_source", kdktr)
+    frame.insert(1, "tanggal_tarik_data", date.today().isoformat())
+    return frame
+
+
+def pull_program_source():
+    frames = []
+    errors = []
+    codes = kantor_codes()
+    set_pull_status(
+        running=True,
+        current="-",
+        processed=0,
+        total=len(codes),
+        success=0,
+        failed=0,
+        error="",
+        hasData=False,
+        message="Mulai menarik data dari L34 ke L00.",
+    )
+    for index, kdktr in enumerate(codes):
+        set_pull_status(
+            current=kdktr,
+            processed=index,
+            message=f"Sedang menarik data {kdktr}.",
+        )
+        try:
+            frame = fetch_program_table(kdktr)
+            if not frame.empty:
+                frames.append(frame)
+            set_pull_status(
+                processed=index + 1,
+                success=len(frames),
+                failed=len(errors),
+                message=f"{kdktr} selesai diproses.",
+            )
+        except Exception as exc:
+            errors.append({"kdktr": kdktr, "error": str(exc)})
+            set_pull_status(
+                processed=index + 1,
+                success=len(frames),
+                failed=len(errors),
+                message=f"{kdktr} gagal diproses.",
+            )
+        if index < len(codes) - 1:
+            next_code = codes[index + 1]
+            set_pull_status(
+                current=next_code,
+                message=f"Jeda {PROGRAM_PULL_DELAY_SECONDS} detik sebelum menarik {next_code}.",
+            )
+            time.sleep(PROGRAM_PULL_DELAY_SECONDS)
+    if not frames:
+        detail = errors[0]["error"] if errors else "Tidak ada data."
+        set_pull_status(
+            running=False,
+            current="-",
+            error=f"Gagal menarik data seluruh kantor. Detail awal: {detail}",
+            hasData=False,
+            message="Tarik data selesai, tetapi tidak ada data yang berhasil diambil.",
+        )
+        raise RuntimeError(f"Gagal menarik data seluruh kantor. Detail awal: {detail}")
+    df = pd.concat(frames, ignore_index=True, sort=False).fillna("")
+    DATA_DIR.mkdir(exist_ok=True)
+    df.to_csv(PROGRAM_CSV_PATH, index=False, encoding="utf-8-sig")
+    payload = program_csv_payload(df)
+    payload["pullMeta"] = {
+        "requested": len(kantor_codes()),
+        "success": len(frames),
+        "failed": len(errors),
+        "errors": errors[:10],
+    }
+    set_pull_status(
+        running=False,
+        current="-",
+        processed=len(codes),
+        success=len(frames),
+        failed=len(errors),
+        error="",
+        hasData=True,
+        message="Tarik data selesai.",
+    )
+    return payload
+
+
+def run_program_pull_job():
+    try:
+        pull_program_source()
+    except Exception as exc:
+        current = get_pull_status()
+        set_pull_status(
+            running=False,
+            error=str(exc),
+            hasData=False,
+            message=current.get("message") or "Tarik data gagal.",
+        )
+
+
+def start_program_pull_job():
+    status = get_pull_status()
+    if status.get("running"):
+        return {"started": False, "status": status}
+    thread = threading.Thread(target=run_program_pull_job, daemon=True)
+    thread.start()
+    time.sleep(0.1)
+    return {"started": True, "status": get_pull_status()}
 
 
 def process_dataframe(df, mode="final"):
@@ -430,18 +741,29 @@ def process_dataframe(df, mode="final"):
 
 
 class AppHandler(BaseHTTPRequestHandler):
+    def send_cors_headers(self):
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+
     def send_json(self, status, payload):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
+        self.send_cors_headers()
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.send_cors_headers()
+        self.end_headers()
+
     def serve_static(self):
         parsed = urlparse(self.path)
         path = parsed.path.strip("/") or "index.html"
-        if path not in {"index.html", "app.js", "styles.css"}:
+        if path not in {"index.html", "sla-program.html", "app.js", "sla-program.js", "smile-table-scraper.js", "smile-loop-scraper.js", "smile-open-test-scraper.js", "styles.css", "tarik_sla_program.bat"}:
             self.send_error(404)
             return
         target = (STATIC_DIR / path).resolve()
@@ -453,6 +775,8 @@ class AppHandler(BaseHTTPRequestHandler):
             content_type = "text/css; charset=utf-8"
         elif target.suffix == ".js":
             content_type = "application/javascript; charset=utf-8"
+        elif target.suffix == ".bat":
+            content_type = "application/octet-stream"
         body = target.read_bytes()
         self.send_response(200)
         self.send_header("Content-Type", content_type)
@@ -477,15 +801,89 @@ class AppHandler(BaseHTTPRequestHandler):
             except Exception as exc:
                 self.send_json(400, {"error": str(exc)})
             return
+        if parsed.path == "/api/sla-program-csv":
+            try:
+                self.send_json(200, load_program_csv())
+            except Exception as exc:
+                self.send_json(404, {"error": str(exc)})
+            return
+        if parsed.path == "/api/sla-program-pull-status":
+            self.send_json(200, get_pull_status())
+            return
         self.serve_static()
 
     def do_POST(self):
-        if urlparse(self.path).path != "/api/upload":
+        path = urlparse(self.path).path
+        if path not in {"/api/upload", "/api/sla-program-upload", "/api/sla-program-pull", "/api/sla-program-table-csv", "/api/sla-program-office-csv", "/api/run-sla-program-bat"}:
             self.send_error(404)
+            return
+        if path == "/api/run-sla-program-bat":
+            try:
+                if not PROGRAM_BAT_PATH.exists():
+                    raise FileNotFoundError("File BAT tarik data belum ditemukan.")
+                query = parse_qs(urlparse(self.path).query)
+                raw_codes = str((query.get("codes") or [""])[0]).upper().strip()
+                selected_codes = []
+                if raw_codes:
+                    selected_codes = [
+                        code.strip()
+                        for code in raw_codes.split(",")
+                        if code.strip() in VALID_OFFICE_CODES
+                    ]
+                    if not selected_codes:
+                        raise ValueError("Kode kantor pilihan tidak valid.")
+                runner_path = launch_sla_program_bat(selected_codes)
+                self.send_json(200, {
+                    "started": True,
+                    "message": "Window tarik data SLA Program sudah dibuka.",
+                    "bat": str(PROGRAM_BAT_PATH),
+                    "runner": str(runner_path),
+                    "codes": selected_codes,
+                })
+            except Exception as exc:
+                self.send_json(400, {"error": str(exc)})
+            return
+        if path == "/api/sla-program-pull":
+            try:
+                self.send_json(200, start_program_pull_job())
+            except Exception as exc:
+                self.send_json(400, {"error": str(exc)})
             return
         content_length = int(self.headers.get("Content-Length", "0"))
         if content_length > MAX_UPLOAD_BYTES:
             self.send_json(413, {"error": "Ukuran file terlalu besar."})
+            return
+        if path == "/api/sla-program-table-csv":
+            try:
+                raw = self.rfile.read(content_length)
+                DATA_DIR.mkdir(exist_ok=True)
+                PROGRAM_CSV_PATH.write_bytes(raw)
+                df = pd.read_csv(io.BytesIO(raw), dtype=str, keep_default_na=False)
+                self.send_json(200, program_csv_payload(df, "sla_program.csv"))
+            except Exception as exc:
+                self.send_json(400, {"error": str(exc)})
+            return
+        if path == "/api/sla-program-office-csv":
+            try:
+                query = parse_qs(urlparse(self.path).query)
+                code = str((query.get("code") or [""])[0]).upper().strip()
+                valid_codes = {f"L{index:02d}" for index in range(35)}
+                if code not in valid_codes:
+                    raise ValueError("Kode kantor tidak valid.")
+                raw = self.rfile.read(content_length)
+                DATA_DIR.mkdir(exist_ok=True)
+                office_path = DATA_DIR / f"{code}.csv"
+                office_path.write_bytes(raw)
+                df = pd.read_csv(io.BytesIO(raw), dtype=str, keep_default_na=False)
+                self.send_json(200, {
+                    "fileName": office_path.name,
+                    "path": str(office_path),
+                    "rowCount": int(len(df)),
+                    "columns": [str(column) for column in df.columns],
+                    "mode": "overwrite",
+                })
+            except Exception as exc:
+                self.send_json(400, {"error": str(exc)})
             return
         form = cgi.FieldStorage(
             fp=self.rfile,
@@ -501,6 +899,15 @@ class AppHandler(BaseHTTPRequestHandler):
             self.send_json(400, {"error": "File belum dipilih."})
             return
         try:
+            if path == "/api/sla-program-upload":
+                if Path(file_item.filename).suffix.lower() != ".csv":
+                    raise ValueError("Format SLA Program harus CSV.")
+                file_bytes = file_item.file.read()
+                DATA_DIR.mkdir(exist_ok=True)
+                PROGRAM_CSV_PATH.write_bytes(file_bytes)
+                df = pd.read_csv(io.BytesIO(file_bytes), dtype=str, keep_default_na=False)
+                self.send_json(200, program_csv_payload(df, "sla_program.csv"))
+                return
             mode = str(form.getvalue("mode") or "final").strip().lower()
             if mode not in {"final", "running"}:
                 mode = "final"

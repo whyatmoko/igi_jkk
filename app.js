@@ -2,8 +2,8 @@ const STORAGE_KEY = "sla-monitoring:last-result";
 const DB_NAME = "sla-monitoring-db";
 const DB_STORE = "datasets";
 const DB_KEY = "last-result";
-const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ6p-wOSp1QP31f8g5CbmLsinCmoHcaR5I-scRqj2qYNWmNLKZKReBg52u9SCKclmU9yGPWJBvLbSQW/pub?gid=0&single=true&output=csv";
-const SHEET_GVIZ_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ6p-wOSp1QP31f8g5CbmLsinCmoHcaR5I-scRqj2qYNWmNLKZKReBg52u9SCKclmU9yGPWJBvLbSQW/gviz/tq?gid=0";
+const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ6p-wOSp1QP31f8g5CbmLsinCmoHcaR5I-scRqj2qYNWmNLKZKReBg52u9SCKclmU9yGPWJBvLbSQW/pub?gid=802130436&single=true&output=csv";
+const SHEET_GVIZ_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ6p-wOSp1QP31f8g5CbmLsinCmoHcaR5I-scRqj2qYNWmNLKZKReBg52u9SCKclmU9yGPWJBvLbSQW/gviz/tq?gid=802130436";
 const INDONESIA_HOLIDAYS = new Set([
   "2026-01-01",
   "2026-01-16",
