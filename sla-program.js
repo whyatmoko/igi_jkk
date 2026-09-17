@@ -16,6 +16,8 @@ const programEls = {
 };
 
 const PROGRAM_SLA_GVIZ_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ6p-wOSp1QP31f8g5CbmLsinCmoHcaR5I-scRqj2qYNWmNLKZKReBg52u9SCKclmU9yGPWJBvLbSQW/gviz/tq?gid=835183209";
+const PROGRAM_SLA_PUBHTML_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ6p-wOSp1QP31f8g5CbmLsinCmoHcaR5I-scRqj2qYNWmNLKZKReBg52u9SCKclmU9yGPWJBvLbSQW/pubhtml/sheet?headers=false&gid=835183209";
+const PROGRAM_SLA_READER_URL = `https://r.jina.ai/http://r.jina.ai/http://${PROGRAM_SLA_PUBHTML_URL}`;
 
 const programState = {
   rows: [],
@@ -76,6 +78,50 @@ function parseGvizProgramTable(table) {
       }),
     };
   }
+
+  return { columns: headers, records };
+}
+
+function splitMarkdownRow(line) {
+  return line
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((cell) => cell.trim());
+}
+
+function parseMarkdownProgramTable(text) {
+  const tableRows = text
+    .split(/\r?\n/)
+    .filter((line) => line.trim().startsWith("|"))
+    .map(splitMarkdownRow)
+    .filter((row) => row.some(Boolean))
+    .filter((row) => !row.every((cell) => /^-+$/.test(cell.replace(/\s/g, ""))));
+
+  const headerIndex = tableRows.findIndex((row) => (
+    row.some((cell) => normalizeKey(cell) === "tanggal")
+    && row.some((cell) => normalizeKey(cell) === "kode_kantor")
+  ));
+  if (headerIndex < 0) {
+    throw new Error("Header tabel SLA Program tidak ditemukan pada respons Spreadsheet.");
+  }
+
+  let headers = tableRows[headerIndex].map((header, index) => header || `kolom_${index + 1}`);
+  const dataRows = tableRows.slice(headerIndex + 1);
+
+  if (/^\d+$/.test(headers[0])) {
+    headers = headers.slice(1);
+  }
+
+  const records = dataRows.map((row) => {
+    const cells = /^\d+$/.test(row[0] || "") ? row.slice(1) : row;
+    const record = {};
+    headers.forEach((header, index) => {
+      record[header] = cells[index] || "";
+    });
+    return record;
+  });
 
   return { columns: headers, records };
 }
@@ -537,6 +583,22 @@ function fetchProgramGvizData() {
   });
 }
 
+async function fetchProgramReaderData() {
+  const response = await fetch(PROGRAM_SLA_READER_URL);
+  if (!response.ok) {
+    throw new Error(`Reader Spreadsheet gagal: HTTP ${response.status}.`);
+  }
+  const text = await response.text();
+  const parsed = parseMarkdownProgramTable(text);
+  return {
+    columns: parsed.columns,
+    records: parsed.records,
+    fileName: "Google Spreadsheet SLA Program",
+    sourceUrl: PROGRAM_SLA_PUBHTML_URL,
+    sourceMode: "reader",
+  };
+}
+
 async function fetchProgramSheetData() {
   const errors = [];
   if (["localhost", "127.0.0.1"].includes(window.location.hostname)) {
@@ -556,6 +618,12 @@ async function fetchProgramSheetData() {
 
   try {
     return await fetchProgramGvizData();
+  } catch (error) {
+    errors.push(error.message);
+  }
+
+  try {
+    return await fetchProgramReaderData();
   } catch (error) {
     errors.push(error.message);
     throw new Error(`Gagal mengambil data SLA Program. ${errors.filter(Boolean).join(" ")}`);
