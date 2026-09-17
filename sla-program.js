@@ -15,6 +15,8 @@ const programEls = {
   downloadCsv: document.getElementById("downloadProgramCsv"),
 };
 
+const PROGRAM_SLA_GVIZ_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ6p-wOSp1QP31f8g5CbmLsinCmoHcaR5I-scRqj2qYNWmNLKZKReBg52u9SCKclmU9yGPWJBvLbSQW/gviz/tq?gid=835183209";
+
 const programState = {
   rows: [],
   source: null,
@@ -51,6 +53,31 @@ function getValue(row, key) {
   const wanted = normalizeKey(key);
   const found = Object.keys(row).find((candidate) => normalizeKey(candidate) === wanted);
   return found ? row[found] : "";
+}
+
+function parseGvizProgramTable(table) {
+  const headers = (table.cols || []).map((col, index) => String(col.label || col.id || `kolom_${index + 1}`).trim());
+  const records = (table.rows || []).map((row) => {
+    const record = {};
+    headers.forEach((header, index) => {
+      const cell = row.c?.[index];
+      record[header] = cell?.f ?? cell?.v ?? "";
+    });
+    return record;
+  });
+
+  if (headers[0] && /^\d+$/.test(headers[0])) {
+    const [, ...cleanHeaders] = headers;
+    return {
+      columns: cleanHeaders,
+      records: records.map((record) => {
+        const { [headers[0]]: _rowNumber, ...cleanRecord } = record;
+        return cleanRecord;
+      }),
+    };
+  }
+
+  return { columns: headers, records };
 }
 
 function parseDay(value) {
@@ -469,13 +496,77 @@ function downloadUrgentCsv() {
   URL.revokeObjectURL(url);
 }
 
+function fetchProgramGvizData() {
+  return new Promise((resolve, reject) => {
+    const callbackName = `slaProgramCallback_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const script = document.createElement("script");
+    const cleanup = () => {
+      delete window[callbackName];
+      script.remove();
+    };
+    const timeout = window.setTimeout(() => {
+      cleanup();
+      reject(new Error("Timeout saat mengambil data SLA Program dari Google Spreadsheet."));
+    }, 60000);
+
+    window[callbackName] = (payload) => {
+      window.clearTimeout(timeout);
+      try {
+        const parsed = parseGvizProgramTable(payload.table || {});
+        cleanup();
+        resolve({
+          columns: parsed.columns,
+          records: parsed.records,
+          fileName: "Google Spreadsheet SLA Program",
+          sourceUrl: PROGRAM_SLA_GVIZ_URL,
+          sourceMode: "jsonp",
+        });
+      } catch (error) {
+        cleanup();
+        reject(error);
+      }
+    };
+
+    script.onerror = () => {
+      window.clearTimeout(timeout);
+      cleanup();
+      reject(new Error("Gagal memuat data SLA Program dari Google Spreadsheet."));
+    };
+    script.src = `${PROGRAM_SLA_GVIZ_URL}&tqx=responseHandler:${callbackName}`;
+    document.head.appendChild(script);
+  });
+}
+
+async function fetchProgramSheetData() {
+  const errors = [];
+  if (["localhost", "127.0.0.1"].includes(window.location.hostname)) {
+    try {
+      const response = await fetch("/api/sla-program-sheet");
+      const text = await response.text();
+      if (text.trim().startsWith("<")) {
+        throw new Error("Server lokal mengembalikan HTML, bukan JSON.");
+      }
+      const payload = JSON.parse(text);
+      if (!response.ok) throw new Error(payload.error || "Gagal mengambil data SLA Program.");
+      return payload;
+    } catch (error) {
+      errors.push(error.message);
+    }
+  }
+
+  try {
+    return await fetchProgramGvizData();
+  } catch (error) {
+    errors.push(error.message);
+    throw new Error(`Gagal mengambil data SLA Program. ${errors.filter(Boolean).join(" ")}`);
+  }
+}
+
 async function loadProgramData() {
   setNotice("Sedang mengambil data SLA Program dari Spreadsheet...", "");
   programEls.refresh.disabled = true;
   try {
-    const response = await fetch("/api/sla-program-sheet");
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || "Gagal mengambil data SLA Program.");
+    const payload = await fetchProgramSheetData();
     programState.rows = payload.records || [];
     programState.source = payload;
     renderDateFilterOptions();
