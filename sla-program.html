@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Monitoring SLA Program</title>
+    <link rel="stylesheet" href="styles.css?v=20260917-1">
+  </head>
+  <body>
+    <main class="app-shell">
+      <nav class="app-menu" aria-label="Menu dashboard SLA">
+        <a class="menu-button" href="index.html">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M9 5h6m-7 4h8m-8 4h5m-6 8h10a2 2 0 0 0 2-2V7l-4-4H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2Z" />
+          </svg>
+          <span>SLA PLKK</span>
+        </a>
+        <a class="menu-button active" href="sla-program.html">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 19V5m0 14h16M8 16v-5m4 5V8m4 8v-7m3-5-4 4-3-3-4 4" />
+          </svg>
+          <span>SLA Program</span>
+        </a>
+      </nav>
+
+      <section class="topbar">
+        <div>
+          <h1>Monitoring SLA Program</h1>
+          <p>Pantau klaim all program yang mendekati batas pembayaran berdasarkan sisa hari SLA.</p>
+        </div>
+        <div class="top-actions">
+          <button id="refreshProgram" class="icon-button sheet-button" type="button" title="Ambil data SLA Program" aria-label="Ambil data SLA Program">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 7h12a4 4 0 0 1 0 8H9m0 0 3-3m-3 3 3 3M5 19h14" />
+            </svg>
+          </button>
+        </div>
+      </section>
+
+      <section class="notice" id="programNotice">
+        Data SLA Program diambil dari tab <strong>SLA</strong> pada Spreadsheet yang sama dengan SLA PLKK.
+      </section>
+
+      <section class="panel controls program-filter-panel">
+        <div class="control-group">
+          <label for="programDateFilter">Tanggal Data</label>
+          <select id="programDateFilter">
+            <option value="ALL">Semua tanggal</option>
+          </select>
+        </div>
+        <div class="control-group">
+          <label for="programBranchFilter">Cabang</label>
+          <select id="programBranchFilter">
+            <option value="ALL">Semua cabang</option>
+          </select>
+        </div>
+        <div class="control-group">
+          <label for="programTypeFilter">Program</label>
+          <select id="programTypeFilter">
+            <option value="ALL">Semua program</option>
+            <option value="JKK">JKK</option>
+            <option value="JHT">JHT</option>
+            <option value="JKM">JKM</option>
+            <option value="JP">JP</option>
+            <option value="JKP">JKP</option>
+          </select>
+        </div>
+        <div class="control-group wide">
+          <label for="programSearchInput">Cari kode klaim / peserta / petugas</label>
+          <input id="programSearchInput" type="search" placeholder="Ketik kata kunci">
+        </div>
+        <div class="control-group reset-filter-group">
+          <label>&nbsp;</label>
+          <button id="programResetFilters" class="filter-reset-button" type="button" title="Refresh filter" aria-label="Refresh filter">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3 12a9 9 0 1 0 3-6.7M3 4v6h6" />
+            </svg>
+          </button>
+        </div>
+      </section>
+
+      <section class="cards" id="programCards"></section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <h2>Rekap Beban per Cabang</h2>
+          <span id="branchRecapMeta">-</span>
+        </div>
+        <div class="table-wrap">
+          <table class="program-table program-recap-table program-matrix-table">
+            <thead>
+              <tr>
+                <th rowspan="2">Cabang</th>
+                <th rowspan="2">Total Beban</th>
+                <th colspan="5" class="matrix-head matrix-zero">SLA 0 Hari</th>
+                <th colspan="5" class="matrix-head matrix-one">SLA 1 Hari</th>
+              </tr>
+              <tr>
+                <th>JKK</th>
+                <th>JHT</th>
+                <th>JKM</th>
+                <th>JP</th>
+                <th>JKP</th>
+                <th>JKK</th>
+                <th>JHT</th>
+                <th>JKM</th>
+                <th>JP</th>
+                <th>JKP</th>
+              </tr>
+            </thead>
+            <tbody id="branchRecapRows">
+              <tr><td colspan="12">Memuat data...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <h2>Daftar Klaim Urgensi</h2>
+          <div class="panel-actions">
+            <span id="programMeta">-</span>
+            <button id="downloadProgramCsv" class="panel-icon-button" type="button" title="Download CSV sesuai filter" aria-label="Download CSV sesuai filter">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" />
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="program-table program-detail-table">
+            <thead>
+              <tr>
+                <th>No</th>
+                <th>Tanggal</th>
+                <th>Kantor</th>
+                <th>Kode Klaim</th>
+                <th>Nama Peserta</th>
+                <th>Tipe</th>
+                <th>Status</th>
+                <th>Petugas</th>
+                <th>Sisa Hari</th>
+              </tr>
+            </thead>
+            <tbody id="programRows">
+              <tr><td colspan="9">Memuat data...</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pagination" id="programPagination"></div>
+      </section>
+    </main>
+    <script src="sla-program.js?v=20260917-1"></script>
+  </body>
+</html>

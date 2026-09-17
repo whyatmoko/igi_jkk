@@ -26,6 +26,7 @@ VALID_OFFICE_CODES = {f"L{index:02d}" for index in range(35)}
 MAX_UPLOAD_BYTES = 30 * 1024 * 1024
 SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ6p-wOSp1QP31f8g5CbmLsinCmoHcaR5I-scRqj2qYNWmNLKZKReBg52u9SCKclmU9yGPWJBvLbSQW/pub?gid=802130436&single=true&output=csv"
 SHEET_HTML_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ6p-wOSp1QP31f8g5CbmLsinCmoHcaR5I-scRqj2qYNWmNLKZKReBg52u9SCKclmU9yGPWJBvLbSQW/pubhtml/sheet?headers=false&gid=802130436"
+PROGRAM_SLA_SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ6p-wOSp1QP31f8g5CbmLsinCmoHcaR5I-scRqj2qYNWmNLKZKReBg52u9SCKclmU9yGPWJBvLbSQW/pubhtml/sheet?headers=false&gid=835183209"
 PROGRAM_SOURCE_URL = "https://smile2.bpjsketenagakerjaan.go.id/smile/mod_pn/form/pn5053_form_detil_sla.php"
 PROGRAM_PULL_DELAY_SECONDS = 2
 PULL_STATUS_LOCK = threading.Lock()
@@ -275,6 +276,17 @@ def load_workbook(file_bytes, filename):
 
 def load_published_sheet():
     request = urllib.request.Request(SHEET_HTML_URL, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(request, timeout=60) as response:
+        html_bytes = response.read()
+    frame = parse_html_table(html_bytes)
+    first_col = str(frame.columns[0]).strip() if len(frame.columns) else ""
+    if first_col.isdigit():
+        frame = frame.drop(columns=[frame.columns[0]])
+    return frame
+
+
+def load_program_sla_sheet():
+    request = urllib.request.Request(PROGRAM_SLA_SHEET_URL, headers={"User-Agent": "Mozilla/5.0"})
     with urllib.request.urlopen(request, timeout=60) as response:
         html_bytes = response.read()
     frame = parse_html_table(html_bytes)
@@ -806,6 +818,14 @@ class AppHandler(BaseHTTPRequestHandler):
                 self.send_json(200, load_program_csv())
             except Exception as exc:
                 self.send_json(404, {"error": str(exc)})
+            return
+        if parsed.path == "/api/sla-program-sheet":
+            try:
+                result = program_csv_payload(load_program_sla_sheet(), "Google Spreadsheet SLA Program")
+                result["sourceUrl"] = PROGRAM_SLA_SHEET_URL
+                self.send_json(200, result)
+            except Exception as exc:
+                self.send_json(400, {"error": str(exc)})
             return
         if parsed.path == "/api/sla-program-pull-status":
             self.send_json(200, get_pull_status())
